@@ -413,6 +413,116 @@ describe("agent routes adapter validation", () => {
     expect(env.CODEX_HOME).toBeUndefined();
   });
 
+  it("clears only the managed AI binding when an incompatible adapter transition is requested", async () => {
+    const agentId = "11111111-1111-4111-8111-111111111111";
+    const existing = await mockAgentService.getById();
+    const binding = {
+      provider: "anthropic" as const,
+      method: "subscription" as const,
+      mode: "responsible_user" as const,
+    };
+    mockAgentService.getById.mockResolvedValue({
+      ...existing,
+      adapterType: "claude_local",
+      adapterConfig: { model: "claude-sonnet-4-6" },
+      runtimeConfig: {
+        aiConnection: binding,
+        heartbeat: { enabled: true, intervalSec: 300 },
+        customRuntimeKey: "preserve-me",
+      },
+    });
+    const app = await createApp();
+
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl)
+        .patch(`/api/agents/${agentId}`)
+        .send({
+          adapterType: "codex_local",
+          adapterConfig: { model: "gpt-5.4" },
+          runtimeConfig: { heartbeat: { enabled: false } },
+          clearAiConnection: true,
+        }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(mockAgentService.update).toHaveBeenCalledOnce();
+    const patch = mockAgentService.update.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(patch.clearAiConnection).toBeUndefined();
+    expect(patch.runtimeConfig).toEqual({
+      heartbeat: { enabled: false },
+      customRuntimeKey: "preserve-me",
+    });
+  });
+
+  it("rejects combining clearAiConnection with a replacement binding", async () => {
+    const agentId = "11111111-1111-4111-8111-111111111111";
+    const existing = await mockAgentService.getById();
+    const binding = {
+      provider: "anthropic" as const,
+      method: "subscription" as const,
+      mode: "responsible_user" as const,
+    };
+    mockAgentService.getById.mockResolvedValue({
+      ...existing,
+      adapterType: "claude_local",
+      adapterConfig: { model: "claude-sonnet-4-6" },
+      runtimeConfig: { aiConnection: binding, heartbeat: { enabled: true } },
+    });
+    const app = await createApp();
+
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl)
+        .patch(`/api/agents/${agentId}`)
+        .send({
+          clearAiConnection: true,
+          runtimeConfig: { aiConnection: binding },
+        }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(res.body).toMatchObject({
+      error: "clearAiConnection cannot be combined with runtimeConfig.aiConnection",
+    });
+    expect(mockAgentService.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["omitted", {}],
+    ["false", { clearAiConnection: false }],
+  ])("preserves the binding when clearAiConnection is %s", async (_label, clearFields) => {
+    const agentId = "11111111-1111-4111-8111-111111111111";
+    const existing = await mockAgentService.getById();
+    mockAgentService.getById.mockResolvedValue({
+      ...existing,
+      adapterType: "claude_local",
+      adapterConfig: { model: "claude-sonnet-4-6" },
+      runtimeConfig: {
+        aiConnection: {
+          provider: "anthropic",
+          method: "subscription",
+          mode: "responsible_user",
+        },
+      },
+    });
+    const app = await createApp();
+
+    const res = await requestApp(app, (baseUrl) =>
+      request(baseUrl)
+        .patch(`/api/agents/${agentId}`)
+        .send({
+          ...clearFields,
+          adapterType: "codex_local",
+          adapterConfig: { model: "gpt-5.4" },
+        }),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(res.body).toMatchObject({
+      error: "Select an AI connection compatible with the new harness and model",
+    });
+    expect(mockAgentService.update).not.toHaveBeenCalled();
+  });
+
   it("forwards a claude_local→process adapter move that drops the OAuth binding to the service unchanged", async () => {
     // The agent has the fixed Claude Code OAuth binding on the claude_local
     // adapter. A PATCH moves the agent to the process adapter and sends an empty

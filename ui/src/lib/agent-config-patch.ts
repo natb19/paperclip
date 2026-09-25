@@ -1,4 +1,9 @@
-import { ADAPTER_AGNOSTIC_KEYS, type Agent } from "@paperclipai/shared";
+import {
+  ADAPTER_AGNOSTIC_KEYS,
+  aiConnectionBindingSchema,
+  isAiConnectionCompatible,
+  type Agent,
+} from "@paperclipai/shared";
 
 export interface AgentConfigOverlay {
   identity: Record<string, unknown>;
@@ -47,6 +52,40 @@ export function buildAgentUpdatePatch(agent: Agent, overlay: AgentConfigOverlay)
     patch.replaceAdapterConfig = true;
   }
 
+  const nextAdapterType = overlay.adapterType ?? agent.adapterType;
+  const nextAdapterConfig = (patch.adapterConfig ?? agent.adapterConfig ?? {}) as Record<string, unknown>;
+  const currentAdapterConfig = (agent.adapterConfig ?? {}) as Record<string, unknown>;
+  // Only execution-routing changes can make an existing binding incompatible;
+  // unrelated adapter settings must not silently remove authentication.
+  const adapterExecutionTargetChanged =
+    nextAdapterType !== agent.adapterType
+    || nextAdapterConfig.model !== currentAdapterConfig.model
+    || (
+      nextAdapterType === "paperclip_runner"
+      && (
+        nextAdapterConfig.provider !== currentAdapterConfig.provider
+        || nextAdapterConfig.acpxAgent !== currentAdapterConfig.acpxAgent
+      )
+    );
+  const runtimeConfigOverlay = overlay.runtime.runtimeConfig;
+  const hasExplicitAiConnectionReplacement =
+    typeof runtimeConfigOverlay === "object"
+    && runtimeConfigOverlay !== null
+    && !Array.isArray(runtimeConfigOverlay)
+    && Object.prototype.hasOwnProperty.call(runtimeConfigOverlay, "aiConnection");
+  const existingAiConnection = aiConnectionBindingSchema.safeParse(agent.runtimeConfig?.aiConnection).data;
+  const shouldClearAiConnection =
+    adapterExecutionTargetChanged
+    && existingAiConnection !== undefined
+    && !hasExplicitAiConnectionReplacement
+    && !isAiConnectionCompatible(
+      existingAiConnection,
+      nextAdapterType,
+      nextAdapterConfig.model,
+      nextAdapterConfig.provider,
+      nextAdapterConfig.acpxAgent,
+    );
+
   if (
     Object.keys(overlay.heartbeat).length > 0
     || Object.keys(overlay.debug).length > 0
@@ -75,6 +114,12 @@ export function buildAgentUpdatePatch(agent: Agent, overlay: AgentConfigOverlay)
 
   if (Object.keys(overlay.runtime).length > 0) {
     Object.assign(patch, overlay.runtime);
+  }
+
+  if (shouldClearAiConnection) {
+    // This is an update intent, not a replacement runtimeConfig value. The
+    // server removes only aiConnection and keeps all other runtime settings.
+    patch.clearAiConnection = true;
   }
 
   return patch;

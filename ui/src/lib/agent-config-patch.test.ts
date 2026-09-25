@@ -173,4 +173,127 @@ describe("buildAgentUpdatePatch", () => {
       desiredSkills: ["research", "code-review"],
     });
   });
+
+  it("requests selective AI binding removal for an incompatible adapter transition", () => {
+    const agent = makeAgent();
+    agent.runtimeConfig = {
+      ...agent.runtimeConfig,
+      aiConnection: {
+        provider: "anthropic",
+        method: "subscription",
+        mode: "responsible_user",
+      },
+    };
+
+    const patch = buildAgentUpdatePatch(
+      agent,
+      makeOverlay({
+        adapterType: "codex_local",
+        adapterConfig: { model: "gpt-5.4" },
+      }),
+    );
+
+    expect(patch).toMatchObject({
+      adapterType: "codex_local",
+      clearAiConnection: true,
+    });
+    expect(patch.runtimeConfig).toBeUndefined();
+  });
+
+  it("does not request removal when the managed binding remains compatible", () => {
+    const agent = makeAgent();
+    agent.adapterType = "opencode_local";
+    agent.adapterConfig = { model: "openrouter/deepseek/deepseek-v4-flash" };
+    agent.runtimeConfig = {
+      ...agent.runtimeConfig,
+      aiConnection: {
+        provider: "openrouter",
+        method: "api_key",
+        mode: "responsible_user",
+      },
+    };
+
+    const patch = buildAgentUpdatePatch(
+      agent,
+      makeOverlay({
+        adapterType: "opencode_local",
+        adapterConfig: { model: "openrouter/openai/gpt-4o-mini" },
+      }),
+    );
+
+    expect(patch).not.toHaveProperty("clearAiConnection");
+  });
+
+  it("does not request removal for an unrelated adapter-config edit", () => {
+    const agent = makeAgent();
+    agent.adapterType = "opencode_local";
+    agent.adapterConfig = { model: "openrouter/deepseek/deepseek-v4-flash" };
+    agent.runtimeConfig = {
+      ...agent.runtimeConfig,
+      aiConnection: {
+        provider: "openrouter",
+        method: "api_key",
+        mode: "responsible_user",
+      },
+    };
+
+    const patch = buildAgentUpdatePatch(
+      agent,
+      makeOverlay({ adapterConfig: { timeoutSec: 120 } }),
+    );
+
+    expect(patch).not.toHaveProperty("clearAiConnection");
+  });
+
+  it("requests removal for an OpenRouter binding when the model is outside OpenRouter", () => {
+    const agent = makeAgent();
+    agent.adapterType = "opencode_local";
+    agent.adapterConfig = { model: "openrouter/deepseek/deepseek-v4-flash" };
+    agent.runtimeConfig = {
+      ...agent.runtimeConfig,
+      aiConnection: {
+        provider: "openrouter",
+        method: "api_key",
+        mode: "responsible_user",
+      },
+    };
+
+    const patch = buildAgentUpdatePatch(
+      agent,
+      makeOverlay({
+        adapterConfig: { model: "anthropic/claude-sonnet-4-6" },
+      }),
+    );
+
+    expect(patch.clearAiConnection).toBe(true);
+  });
+
+  it("does not request removal when the user supplies an explicit replacement binding", () => {
+    const agent = makeAgent();
+    agent.runtimeConfig = {
+      ...agent.runtimeConfig,
+      aiConnection: {
+        provider: "anthropic",
+        method: "subscription",
+        mode: "responsible_user",
+      },
+    };
+
+    const replacement = {
+      provider: "openai" as const,
+      method: "api_key" as const,
+      mode: "responsible_user" as const,
+    };
+    const patch = buildAgentUpdatePatch(
+      agent,
+      makeOverlay({
+        adapterType: "codex_local",
+        adapterConfig: { model: "gpt-5.4" },
+        runtime: { runtimeConfig: { aiConnection: replacement } },
+      }),
+    );
+
+    expect(patch).not.toHaveProperty("clearAiConnection");
+    expect(patch.runtimeConfig).toEqual({ aiConnection: replacement });
+  });
 });

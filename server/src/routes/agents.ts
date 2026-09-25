@@ -5230,6 +5230,11 @@ export function agentRoutes(
     const patchData = { ...(req.body as Record<string, unknown>) };
     const replaceAdapterConfig = patchData.replaceAdapterConfig === true;
     delete patchData.replaceAdapterConfig;
+    // This is an update-only intent flag, not an agent column. Consume it before
+    // the patch reaches the service so persistence sees only the resulting
+    // runtimeConfig object.
+    const clearAiConnection = patchData.clearAiConnection === true;
+    delete patchData.clearAiConnection;
     // The apply-existing flag is not an agent column. The server binds the fixed
     // reference to the owner stored value with no login round trip. Remove it
     // from the patch so it never reaches the update values.
@@ -5265,6 +5270,9 @@ export function agentRoutes(
       if (!runtimeConfig) {
         res.status(422).json({ error: "runtimeConfig must be an object" });
         return;
+      }
+      if (clearAiConnection && hasOwn(runtimeConfig, "aiConnection")) {
+        throw unprocessable("clearAiConnection cannot be combined with runtimeConfig.aiConnection");
       }
       assertProviderTraceSettingTransition(
         req,
@@ -5359,8 +5367,22 @@ export function agentRoutes(
         adapterConfig: patchData.adapterConfig,
       });
     }
-    if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !requestedRuntimeConfig.aiConnection) requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
-    const nextAiBinding = aiConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
+    if (clearAiConnection) {
+      // Merge before deleting the binding so this intent changes only the
+      // aiConnection key. Other runtime settings survive even when the caller
+      // supplied a partial runtimeConfig alongside the clear flag.
+      const mergedRuntimeConfig = {
+        ...existing.runtimeConfig,
+        ...(requestedRuntimeConfig ?? {}),
+      };
+      delete mergedRuntimeConfig.aiConnection;
+      requestedRuntimeConfig = mergedRuntimeConfig;
+    } else if (existing.runtimeConfig.aiConnection && requestedRuntimeConfig && !requestedRuntimeConfig.aiConnection) {
+      requestedRuntimeConfig.aiConnection = existing.runtimeConfig.aiConnection;
+    }
+    const nextAiBinding = clearAiConnection
+      ? undefined
+      : aiConnectionBindingSchema.safeParse(requestedRuntimeConfig?.aiConnection ?? existing.runtimeConfig.aiConnection).data;
     if (nextAiBinding) {
       await assertCanUpdateAgent(req, existing);
       const changed = JSON.stringify(nextAiBinding) !== JSON.stringify(existing.runtimeConfig.aiConnection);

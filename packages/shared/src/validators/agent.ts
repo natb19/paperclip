@@ -147,6 +147,10 @@ export const updateAgentSchema = objectWithoutDefaults(
   .extend({
     permissions: z.never().optional(),
     replaceAdapterConfig: z.boolean().optional(),
+    // Update-only intent: remove only runtimeConfig.aiConnection while leaving
+    // every other runtime setting intact. The server consumes this field before
+    // persisting the agent patch.
+    clearAiConnection: z.boolean().optional(),
     status: z.enum(AGENT_STATUSES).optional(),
     spentMonthlyCents: z.number().int().nonnegative().optional(),
   });

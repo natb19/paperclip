@@ -49,8 +49,14 @@ setting determines which agents can use it. There is no additional AI agent
 authorization, and old delegation records do not override the human audience.
 
 A connection choice never changes the harness, model, or provider routing.
-Changing those separately may make a binding incompatible; saving then requires
-a compatible choice. Agent configuration cannot grant access to another account.
+Changing those separately may make a binding incompatible. On an agent update,
+the edit form emits `clearAiConnection: true` when the selected adapter, model,
+or runner target makes an existing managed binding incompatible and no
+replacement binding is supplied. The server removes only
+`runtimeConfig.aiConnection` and preserves the other runtime settings. An
+explicit replacement binding cannot be combined with that clear intent; omitting
+the flag or sending `false` preserves the existing binding. Agent configuration
+cannot grant access to another account.
 
 Personal defaults are unique per company, user, and provider. A Claude bot can use one user’s subscription and another user’s API key without changing its harness or model. Explicit shared selections remain pinned to the selected account and method.
 The first successful personal connection sets a default only when none exists.

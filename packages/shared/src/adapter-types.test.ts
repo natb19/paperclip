@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_ROLE_LABELS, acceptInviteSchema, createAgentSchema, updateAgentSchema } from "./index.js";
+import {
+  AGENT_ROLE_LABELS,
+  acceptInviteSchema,
+  agentRuntimeConfigSchema,
+  createAgentHireSchema,
+  createAgentSchema,
+  updateAgentSchema,
+} from "./index.js";
 
 describe("dynamic adapter type validation schemas", () => {
   it("accepts external adapter types in create/update agent schemas", () => {
@@ -60,5 +67,27 @@ describe("dynamic adapter type validation schemas", () => {
     ).toBe("security");
 
     expect(AGENT_ROLE_LABELS.security).toBe("Security");
+  });
+
+  it("accepts clearAiConnection only as an update intent", () => {
+    expect(updateAgentSchema.parse({ clearAiConnection: true }).clearAiConnection).toBe(true);
+    expect(updateAgentSchema.parse({ clearAiConnection: false }).clearAiConnection).toBe(false);
+    expect(() => updateAgentSchema.parse({ clearAiConnection: "true" })).toThrow();
+    expect(
+      createAgentSchema.parse({
+        name: "New Agent",
+        adapterType: "codex_local",
+        clearAiConnection: true,
+      }),
+    ).not.toHaveProperty("clearAiConnection");
+    expect(
+      createAgentHireSchema.parse({
+        name: "Hired Agent",
+        adapterType: "codex_local",
+        clearAiConnection: true,
+      }),
+    ).not.toHaveProperty("clearAiConnection");
+    expect(agentRuntimeConfigSchema.shape).not.toHaveProperty("clearAiConnection");
+    expect(() => agentRuntimeConfigSchema.parse({ aiConnection: null })).toThrow();
   });
 });
