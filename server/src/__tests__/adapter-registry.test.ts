@@ -225,6 +225,28 @@ describe("server adapter registry", () => {
     expect(resolved!.requiresMaterializedRuntimeSkills).toBeUndefined();
   });
 
+  it("ships opencode_local with a safe declarative config schema", async () => {
+    const adapter = findActiveServerAdapter("opencode_local");
+    expect(adapter).not.toBeNull();
+    expect(adapter!.getConfigSchema).toBeTypeOf("function");
+
+    const schema = await adapter!.getConfigSchema!();
+    expect(schema.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "model", type: "combobox", required: true }),
+        expect.objectContaining({ key: "variant", type: "select" }),
+        expect.objectContaining({ key: "instructionsFilePath", type: "text" }),
+        expect.objectContaining({ key: "dangerouslySkipPermissions", type: "toggle", default: true }),
+        expect.objectContaining({ key: "timeoutSec", type: "number", default: 0 }),
+        expect.objectContaining({ key: "graceSec", type: "number", default: 20 }),
+      ]),
+    );
+    const keys = schema.fields.map((field) => field.key);
+    expect(keys).not.toContain("env");
+    expect(keys).not.toContain("promptTemplate");
+    expect(schema.fields.every((field) => field.meta?.secret !== true)).toBe(true);
+  });
+
   it("built-in claude_local adapter declares capability flags", () => {
     const adapter = findActiveServerAdapter("claude_local");
     expect(adapter).not.toBeNull();

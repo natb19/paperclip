@@ -20,6 +20,56 @@ vi.mock("../components/MarkdownBody", () => ({
   MarkdownBody: ({ children }: { children: string }) => <div>{children}</div>,
 }));
 
+function makeHeartbeatRun(overrides: Partial<HeartbeatRun> = {}): HeartbeatRun {
+  const timestamp = new Date("2026-08-31T12:00:00Z");
+
+  return {
+    id: "run-opencode-1",
+    companyId: "company-1",
+    agentId: "agent-opencode",
+    invocationSource: "on_demand",
+    triggerDetail: "manual",
+    status: "succeeded",
+    responsibleUserId: null,
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    error: null,
+    wakeupRequestId: null,
+    exitCode: 0,
+    signal: null,
+    usageJson: null,
+    resultJson: { summary: "The run completed successfully." },
+    sessionIdBefore: null,
+    sessionIdAfter: null,
+    logStore: null,
+    logRef: null,
+    logBytes: null,
+    logSha256: null,
+    logCompressed: false,
+    stdoutExcerpt: null,
+    stderrExcerpt: null,
+    errorCode: null,
+    externalRunId: null,
+    processPid: null,
+    processStartedAt: null,
+    lastOutputAt: timestamp,
+    lastOutputSeq: 0,
+    lastOutputStream: null,
+    lastOutputBytes: null,
+    retryOfRunId: null,
+    processLossRetryCount: 0,
+    livenessState: "completed",
+    livenessReason: null,
+    continuationAttempt: 0,
+    lastUsefulActionAt: timestamp,
+    nextAction: null,
+    contextSnapshot: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+}
+
 describe("AgentOverview", () => {
   it("prioritizes identity, capability, runtime, skills, tasks, and scoped Audit entry points", () => {
     const agent = {
@@ -74,5 +124,50 @@ describe("AgentOverview", () => {
     expect(markup).toContain('href="/activity/costs?agentId=agent-1"');
     expect(markup).not.toContain("Run Activity");
     expect(markup).not.toContain("Tasks by Status");
+  });
+  it("surfaces read-only runtime details and redacts configured command secrets", () => {
+    const agent = {
+      id: "agent-opencode",
+      companyId: "company-1",
+      name: "OpenCode Coder",
+      urlKey: "opencodecoder",
+      role: "engineer",
+      title: null,
+      status: "active",
+      reportsTo: null,
+      capabilities: "",
+      adapterType: "opencode_local",
+      adapterConfig: {
+        model: "openrouter/anthropic/claude-sonnet-5",
+        command: "opencode run --api-key=top-secret",
+        cwd: "/workspace/project",
+      },
+      runtimeConfig: {},
+      chainOfCommand: [],
+      access: { canAssignTasks: true, taskAssignSource: "explicit_grant", membership: null, grants: [] },
+    } as unknown as AgentDetail;
+    const run: HeartbeatRun = makeHeartbeatRun();
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <AgentOverview
+          agent={agent}
+          runs={[run]}
+          assignedIssues={[] as Issue[]}
+          directReportCount={0}
+          skillNames={[]}
+          agentRouteId="opencodecoder"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain("Status");
+    expect(markup).toContain("Provider");
+    expect(markup).toContain("openrouter");
+    expect(markup).toContain("Command");
+    expect(markup).toContain("opencode run --api-key=***REDACTED***");
+    expect(markup).not.toContain("top-secret");
+    expect(markup).toContain("/workspace/project");
+    expect(markup).toContain("succeeded");
   });
 });

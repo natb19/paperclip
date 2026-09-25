@@ -1730,6 +1730,14 @@ export function AgentOverview({
     ?? asNonEmptyString(agent.adapterConfig?.modelName)
     ?? asNonEmptyString(agent.runtimeConfig?.model)
     ?? "Adapter default";
+  const configuredModelProvider = configuredModel.includes("/")
+    ? configuredModel.slice(0, configuredModel.indexOf("/"))
+    : null;
+  const configuredCommand = asNonEmptyString(agent.adapterConfig?.command);
+  const displayCommand = configuredCommand
+    ? redactCommandSecretText(configuredCommand, REDACTED_ENV_VALUE)
+    : null;
+  const configuredCwd = asNonEmptyString(agent.adapterConfig?.cwd);
   const lastRun = runs[0] ?? null;
 
   return (
@@ -1762,9 +1770,19 @@ export function AgentOverview({
             <Link className="text-xs text-muted-foreground hover:text-foreground" to={agentDetailHref(agentRouteId, "runtime")}>Configure</Link>
           </div>
           <div className="space-y-3">
+            <SummaryRow label="Status"><StatusBadge status={agent.status} /></SummaryRow>
             <SummaryRow label="Adapter"><span className="text-sm">{adapterLabels[agent.adapterType] ?? agent.adapterType}</span></SummaryRow>
-            <SummaryRow label="Model"><span className="max-w-64 truncate text-sm font-mono">{configuredModel}</span></SummaryRow>
+            {configuredModelProvider && (
+              <SummaryRow label="Provider"><span className="text-sm font-mono">{configuredModelProvider}</span></SummaryRow>
+            )}
+            <SummaryRow label="Model"><span className="max-w-64 truncate text-sm font-mono" title={configuredModel}>{configuredModel}</span></SummaryRow>
             <SummaryRow label="Session"><span className="max-w-64 truncate text-sm font-mono">{runtimeState?.sessionDisplayId ?? runtimeState?.sessionId ?? "No session"}</span></SummaryRow>
+            {displayCommand && (
+              <SummaryRow label="Command"><span className="max-w-64 truncate text-sm font-mono" title={displayCommand}>{displayCommand}</span></SummaryRow>
+            )}
+            {configuredCwd && (
+              <SummaryRow label="Working directory"><span className="max-w-64 truncate text-sm font-mono" title={configuredCwd}>{configuredCwd}</span></SummaryRow>
+            )}
             <SummaryRow label="Last run">
               <span className="text-sm">{lastRun ? `${lastRun.status} · ${relativeTime(lastRun.createdAt)}` : "No runs"}</span>
             </SummaryRow>

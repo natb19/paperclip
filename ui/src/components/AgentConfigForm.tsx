@@ -1990,33 +1990,35 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               {/* Edit-only: timeout + grace period */}
               {!isCreate && (
                 <>
-                  {!configSchema?.fields.some((field) => field.key === "timeoutSec") && (
-                  <Field label="Timeout (sec)" hint={help.timeoutSec}>
-                    <DraftNumberInput
-                      value={eff(
-                        "adapterConfig",
-                        "timeoutSec",
-                        Number(config.timeoutSec ?? 0),
-                      )}
-                      onCommit={(v) => mark("adapterConfig", "timeoutSec", v)}
-                      immediate
-                      className={inputClass}
-                    />
-                  </Field>
+                  {adapterType !== "opencode_local" &&
+                    !configSchema?.fields.some((field) => field.key === "timeoutSec") && (
+                    <Field label="Timeout (sec)" hint={help.timeoutSec}>
+                      <DraftNumberInput
+                        value={eff(
+                          "adapterConfig",
+                          "timeoutSec",
+                          Number(config.timeoutSec ?? 0),
+                        )}
+                        onCommit={(v) => mark("adapterConfig", "timeoutSec", v)}
+                        immediate
+                        className={inputClass}
+                      />
+                    </Field>
                   )}
-                  {!configSchema?.fields.some((field) => field.key === "graceSec") && (
-                  <Field label="Interrupt grace period (sec)" hint={help.graceSec}>
-                    <DraftNumberInput
-                      value={eff(
-                        "adapterConfig",
-                        "graceSec",
-                        Number(config.graceSec ?? 15),
-                      )}
-                      onCommit={(v) => mark("adapterConfig", "graceSec", v)}
-                      immediate
-                      className={inputClass}
-                    />
-                  </Field>
+                  {adapterType !== "opencode_local" &&
+                    !configSchema?.fields.some((field) => field.key === "graceSec") && (
+                    <Field label="Interrupt grace period (sec)" hint={help.graceSec}>
+                      <DraftNumberInput
+                        value={eff(
+                          "adapterConfig",
+                          "graceSec",
+                          Number(config.graceSec ?? 15),
+                        )}
+                        onCommit={(v) => mark("adapterConfig", "graceSec", v)}
+                        immediate
+                        className={inputClass}
+                      />
+                    </Field>
                   )}
                 </>
               )}

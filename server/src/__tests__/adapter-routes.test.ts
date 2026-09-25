@@ -472,6 +472,41 @@ describe("adapter routes", () => {
     );
   });
 
+  it("serves the built-in opencode_local config schema with safe runtime fields", async () => {
+    const app = createApp();
+
+    const res = await request(app).get("/api/adapters/opencode_local/config-schema");
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "model", type: "combobox", required: true }),
+        expect.objectContaining({
+          key: "variant",
+          type: "select",
+          options: expect.arrayContaining([
+            expect.objectContaining({ value: "high" }),
+          ]),
+        }),
+        expect.objectContaining({
+          key: "dangerouslySkipPermissions",
+          type: "toggle",
+          default: true,
+        }),
+        expect.objectContaining({ key: "cwd", type: "text" }),
+        expect.objectContaining({ key: "instructionsFilePath", type: "text" }),
+        expect.objectContaining({ key: "command", type: "text", default: "opencode" }),
+        expect.objectContaining({ key: "extraArgs", type: "text" }),
+        expect.objectContaining({ key: "timeoutSec", type: "number", default: 0 }),
+        expect.objectContaining({ key: "graceSec", type: "number", default: 20 }),
+      ]),
+    );
+    const keys = res.body.fields.map((field: { key: string }) => field.key);
+    expect(keys).not.toContain("env");
+    expect(keys).not.toContain("promptTemplate");
+    expect(res.body.fields.every((field: { meta?: { secret?: boolean } }) => field.meta?.secret !== true)).toBe(true);
+  });
+
   it("serves built-in Hermes config schemas", async () => {
     const app = createApp();
 
