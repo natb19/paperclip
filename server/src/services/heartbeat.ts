@@ -785,6 +785,19 @@ export {
 } from "./recovery/service.js";
 export const ACTIVE_RUN_OUTPUT_PROGRESS_FLUSH_INTERVAL_MS = 60 * 1000;
 export const ACTIVE_RUN_LOG_RUNTIME_STATUS_REFRESH_INTERVAL_MS = 5 * 1000;
+// A run whose adapter process has started but has written nothing to stdout or
+// stderr is almost always wedged: the CLI logged its failure internally and
+// hung with both streams empty. This is deliberately its own, much shorter
+// threshold. The 60-minute `outputSilence` suspicion thresholds are tuned for a
+// slow-but-alive run and structurally cannot fire before `timeoutSec` (45 min),
+// so they cannot mitigate this wedge. A healthy local CLI emits its first
+// output within a few seconds, so 120 s is a wide margin that still fails a
+// zero-output run ~40 minutes earlier than the runaway timeout.
+export const ZERO_OUTPUT_STARTUP_PROBE_MS = 120_000;
+// Distinct, greppable error code for a run failed by the probe above. Kept
+// separate from `timeout` so the wedge is visible as its own failure class in
+// the run list and in recovery classification.
+export const ADAPTER_NO_OUTPUT_ERROR_CODE = "adapter_no_output";
 export const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS = [
   30_000, 30_000,
 ] as const;
@@ -8861,6 +8874,69 @@ export async function persistHeartbeatRunProcessMetadata(
     });
     return run;
   });
+}
+
+/**
+ * Directly clears the issue checkout/execution lock columns when they still
+ * point at a terminal run.
+ *
+ * `releaseIssueExecution` normally clears these inside its own transaction, but
+ * that transaction is rolled back when promotion raises (for example the
+ * `responsible_user_unresolved` escalation). A terminal run must never keep an
+ * issue pinned, so this is the unconditional, idempotent backstop the terminal
+ * path applies when the richer release cannot complete. It mirrors the direct
+ * clears in `execution-control-reconciliation.ts` and
+ * `legacy-execution-recovery.ts`.
+ *
+ * The SQL re-checks the run status under the update, so a stale caller snapshot
+ * can never clear a lock that a different writer has already moved to a live
+ * run.
+ */
+export async function clearTerminalRunIssueLocks(
+  db: Db,
+  run: Pick<typeof heartbeatRuns.$inferSelect, "id" | "companyId" | "status">,
+): Promise<string[]> {
+  if (!isHeartbeatRunTerminalStatus(run.status)) return [];
+  const now = new Date();
+  const updated = await db
+    .update(issues)
+    .set({
+      checkoutRunId: null,
+      executionRunId: null,
+      executionAgentNameKey: null,
+      executionLockedAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(issues.companyId, run.companyId),
+        or(eq(issues.checkoutRunId, run.id), eq(issues.executionRunId, run.id)),
+        sql`exists (
+          select 1 from ${heartbeatRuns}
+          where ${heartbeatRuns.id} = ${run.id}
+            and ${heartbeatRuns.status} in ('succeeded', 'interrupted', 'failed', 'cancelled', 'timed_out')
+        )`,
+      ),
+    )
+    .returning({ id: issues.id });
+  if (updated.length === 0) return [];
+
+  for (const issue of updated) {
+    await logActivity(db, {
+      companyId: run.companyId,
+      actorType: "system",
+      actorId: "heartbeat",
+      action: "issue.terminal_run_lock_cleared",
+      entityType: "issue",
+      entityId: issue.id,
+      details: {
+        source: "heartbeat.terminal_run_lock_release",
+        runId: run.id,
+        runStatus: run.status,
+      },
+    }).catch(() => undefined);
+  }
+  return updated.map((issue) => issue.id);
 }
 
 async function terminateHeartbeatRunProcess(input: {
@@ -19295,6 +19371,132 @@ export function heartbeatService(
     return { reaped: reaped.length, runIds: reaped };
   }
 
+  // Fail a run that started its adapter process but has written nothing at all
+  // for longer than the dedicated startup probe window. The wedge this catches
+  // logs its provider error only to its own CLI log and then hangs with empty
+  // stdout/stderr, so no other liveness input can see it before the much longer
+  // `timeoutSec`. The failure uses a distinct error code and then runs the same
+  // terminal path as the orphan reaper, including releasing the issue
+  // checkout/execution lock.
+  //
+  // Native runs are resolved by the native finalization coordinator, and a run
+  // still owned by a live legacy controller is being supervised remotely; both
+  // are skipped so the probe cannot preempt their recovery.
+  async function failZeroOutputRuns(opts?: { now?: Date; probeMs?: number }) {
+    const now = opts?.now ?? new Date();
+    const probeMs = opts?.probeMs ?? ZERO_OUTPUT_STARTUP_PROBE_MS;
+    if (!(probeMs > 0)) return { scanned: 0, failed: 0, runIds: [] as string[] };
+
+    const cutoff = new Date(now.getTime() - probeMs);
+    const candidates = await db
+      .select({
+        run: heartbeatRuns,
+        adapterType: agents.adapterType,
+        adapterConfig: agents.adapterConfig,
+      })
+      .from(heartbeatRuns)
+      .innerJoin(agents, eq(heartbeatRuns.agentId, agents.id))
+      .where(
+        and(
+          eq(heartbeatRuns.status, "running"),
+          isNull(heartbeatRuns.lastOutputAt),
+          eq(heartbeatRuns.lastOutputSeq, 0),
+          isNotNull(heartbeatRuns.processStartedAt),
+          lte(heartbeatRuns.processStartedAt, cutoff),
+        ),
+      );
+
+    const runIds: string[] = [];
+    for (const { run, adapterType, adapterConfig } of candidates) {
+      if (run.runtimeMode === "native") continue;
+      if (isNativeRunnerOwnershipHeld(run)) continue;
+      if (await hasLiveLegacyController(db, run)) continue;
+
+      const message =
+        `No adapter output within ${Math.round(probeMs / 1000)}s of process start; ` +
+        "failing the run instead of waiting for the run timeout";
+      const failureWrite = await setRunStatusFromLive(run.id, "failed", ["running"], {
+        error: message,
+        errorCode: ADAPTER_NO_OUTPUT_ERROR_CODE,
+        finishedAt: now,
+        resultJson: mergeRunStopMetadataForAgent(
+          { adapterType, adapterConfig },
+          "failed",
+          {
+            resultJson: parseObject(run.resultJson),
+            errorCode: ADAPTER_NO_OUTPUT_ERROR_CODE,
+            errorMessage: message,
+          },
+        ),
+      });
+      if (!failureWrite.updated || !failureWrite.run) continue;
+
+      // The wedged child can still be alive. Stop its process group so it does
+      // not linger after the run is terminal. The run status compare-and-set
+      // above already fenced a concurrent finalization.
+      await terminateHeartbeatRunProcess({
+        pid: run.processPid,
+        processGroupId: run.processGroupId,
+        graceMs: 5_000,
+      }).catch((err) => {
+        logger.warn(
+          { err, runId: run.id },
+          "failed to terminate zero-output adapter process",
+        );
+      });
+      runningProcesses.delete(run.id);
+
+      let finalizedRun: typeof heartbeatRuns.$inferSelect | null =
+        failureWrite.run;
+      await setWakeupStatus(run.wakeupRequestId, "failed", {
+        finishedAt: now,
+        error: message,
+      });
+      finalizedRun =
+        (await classifyAndPersistRunLiveness(
+          finalizedRun,
+          parseObject(finalizedRun.resultJson),
+        )) ?? finalizedRun;
+      await releaseEnvironmentLeasesForRun({
+        runId: finalizedRun.id,
+        companyId: finalizedRun.companyId,
+        agentId: finalizedRun.agentId,
+        status: finalizedRun.status,
+        failureReason: finalizedRun.error ?? undefined,
+      });
+      // The probe schedules no retry of its own; it hands the run to the same
+      // release path every terminal run uses, which promotes queued work and
+      // lets the bounded recovery retry (max two attempts) decide. A retry onto
+      // a still-dead provider simply wedges again and is caught by this same
+      // probe in two minutes instead of forty-five.
+      await releaseIssueExecutionAndPromote(finalizedRun);
+      await appendRunEvent(finalizedRun, {
+        eventType: "lifecycle",
+        stream: "system",
+        level: "error",
+        message: "run failed: no adapter output after startup probe window",
+        payload: {
+          errorCode: ADAPTER_NO_OUTPUT_ERROR_CODE,
+          processStartedAt: run.processStartedAt?.toISOString() ?? null,
+          probeMs,
+        },
+      });
+      await finalizeAgentStatus(run.agentId, "failed", message, {
+        wasFirstHeartbeat: timerClaimWasFirstHeartbeat(run),
+      });
+      await startNextQueuedRunForAgent(run.agentId);
+      runIds.push(run.id);
+    }
+
+    if (runIds.length > 0) {
+      logger.warn(
+        { failedCount: runIds.length, runIds },
+        "failed zero-output heartbeat runs at startup probe",
+      );
+    }
+    return { scanned: candidates.length, failed: runIds.length, runIds };
+  }
+
   async function resumeQueuedRuns() {
     if ((await getSchedulingSuppression()).suppressed) return;
     await resumeExecutionWaitComments();
@@ -26038,6 +26240,20 @@ export function heartbeatService(
         });
       }
     } catch (error) {
+      // The wake-queue release ran inside its own transaction. When promotion
+      // raises, that transaction rolls back, so a terminal run would otherwise
+      // keep `checkoutRunId` / `executionRunId` pinned and strand the issue
+      // until a board hand-clear. Clear them directly before surfacing the
+      // original failure.
+      try {
+        const current = await getRun(run.id);
+        if (current) await clearTerminalRunIssueLocks(db, current);
+      } catch (clearError) {
+        logger.warn(
+          { err: clearError, runId: run.id },
+          "failed to clear terminal run issue locks after a failed execution release",
+        );
+      }
       if (
         error instanceof WakeQueueApplicationError &&
         error.code === "responsible_user_unresolved"
@@ -29416,6 +29632,7 @@ export function heartbeatService(
     reconcileHotRestartAdoption,
     recoverNativeRunsAfterRestart,
     reapOrphanedRuns,
+    failZeroOutputRuns,
     sweepOrphanedActiveLeases,
     sweepPendingCleanupLeases,
     // Override-aware scheduling-suppression check (honors the worktree

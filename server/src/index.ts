@@ -1553,6 +1553,14 @@ async function startServerWithDatabaseTeardown(
           );
         }
 
+        const zeroOutput = await heartbeat.failZeroOutputRuns();
+        if (zeroOutput.failed > 0) {
+          logger.warn(
+            { ...zeroOutput },
+            "startup zero-output startup probe failed silent runs",
+          );
+        }
+
         const scanned = await heartbeat.scanSilentActiveRuns();
         if (scanned.created > 0 || scanned.escalated > 0) {
           logger.warn({ ...scanned }, "startup active-run output watchdog created review work");
@@ -1787,6 +1795,15 @@ async function startServerWithDatabaseTeardown(
               const reconciled = await heartbeat.reconcileTaskWatchdogs();
               if (reconciled.triggered > 0) {
                 logger.warn({ ...reconciled }, "periodic task-watchdog reconciliation triggered watchdog work");
+              }
+            })
+            .then(async () => {
+              const zeroOutput = await heartbeat.failZeroOutputRuns();
+              if (zeroOutput.failed > 0) {
+                logger.warn(
+                  { ...zeroOutput },
+                  "periodic zero-output startup probe failed silent runs",
+                );
               }
             })
             .then(async () => {
