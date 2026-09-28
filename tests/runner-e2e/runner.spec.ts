@@ -3,6 +3,7 @@ import { completionQualityControls, completionQualityStatus, judgeCompletionQual
 import { completionDelivery, type CompletionObservation } from "./completion-updates.js";
 import { runInstructionPersistenceFlow } from "./instruction-persistence.js";
 import { gradeApiResponsePaging, readResponseProof, responseEvidenceDescription } from "./api-response-reading.js";
+import { runBlockerFlow } from "./blocker-flow.js";
 import { observeBrowserBootstrap } from "./browser-bootstrap-diagnostics.js";
 import { runAccountingFlow } from "./accounting-flow.js";
 import type { Issue } from "../../packages/shared/src/types/issue.js";
@@ -550,7 +551,7 @@ for (const execution of executions) {
     const credentials = credentialValues();
     const secrets = normalizedSecrets(Object.values(credentials));
     const api = new RunnerApi(request);
-    const companyRunFlow = ["continuation_accounting", "continuation", "context_integrity", "agent_chat", "everyday_workflow", "first_task", "instruction_persistence"].includes(execution.task.flow);
+    const companyRunFlow = ["blocker_guidance", "continuation_accounting", "continuation", "context_integrity", "agent_chat", "everyday_workflow", "first_task", "instruction_persistence"].includes(execution.task.flow);
     const consoleDiagnostics: Array<Record<string, unknown>> = [];
     const networkDiagnostics: Array<Record<string, unknown>> = [];
     const pageLifecycleDiagnostics: Array<Record<string, unknown>> = [];
@@ -881,7 +882,18 @@ for (const execution of executions) {
         secrets,
       );
 
-      if (execution.task.flow === "continuation_accounting") {
+      if (execution.task.flow === "blocker_guidance") {
+        const blocker = await runBlockerFlow({ page, api, fixtures, execution, nonce, workspacePath,
+          deadlineAt: startedAtMs + deadlineMs - 30_000,
+          observe: (currentIssue, currentRuns, checks) => {
+            issue = currentIssue; selectedRuns = currentRuns;
+            matcherResults = checks.map(check => ({ matcher: { kind: "json_path" as const, path: `blocker.${check.id}`, expected: true }, passed: check.passed, detail: check.detail }));
+          },
+          capture: captureScreenshot,
+          evidence: (name, data) => writeSanitizedJson(snapshotsDir, name, data, secrets),
+        });
+        issue = blocker.issue as IssueRecord; selectedRuns = blocker.runs as RunRecord[];
+      } else if (execution.task.flow === "continuation_accounting") {
         const accounting = await runAccountingFlow({
           page, api, fixtures, execution, nonce, deadlineAt: startedAtMs + deadlineMs - 60_000,
           restart: () => restartIsolatedPaperclipServer({ api, requestId: `accounting-${nonce}`, deadlineAt: startedAtMs + deadlineMs }),
