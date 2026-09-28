@@ -118,6 +118,7 @@ export async function runBlockerFlow(input: {
   } finally {
     let lastObservation: unknown;
     if (issue) lastObservation = await state("final").catch(error => ({ evidenceError: String(error) }));
+    await input.evidence("api-state.json", { capturePhase: "blocker-final", issue, runs, checks, lastObservation });
     await input.evidence("blocker-guidance.json", { schema: "paperclip.blocker-guidance.v1", caseId: scenario.id,
       prompt: scenario.prompt, hashes, managerId, assigneeId: fixtures.agent.id, checks, checkpoints, lastObservation });
   }
