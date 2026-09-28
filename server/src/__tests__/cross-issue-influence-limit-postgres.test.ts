@@ -7,6 +7,7 @@ import {
   companies,
   createDb,
   heartbeatRuns,
+  issues,
 } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
@@ -31,6 +32,7 @@ describeEmbeddedPostgres("cross-issue influence limit PostgreSQL serialization",
 
   afterEach(async () => {
     await db.delete(activityLog);
+    await db.delete(issues);
     await db.delete(heartbeatRuns);
     await db.delete(agents);
     await db.delete(companies);
@@ -112,5 +114,76 @@ describeEmbeddedPostgres("cross-issue influence limit PostgreSQL serialization",
       .where(and(eq(activityLog.companyId, companyId), eq(activityLog.runId, runId)));
     expect(recorded.filter((row) => row.action === "issue.cross_issue_influence_observed")).toHaveLength(20);
     expect(recorded.filter((row) => row.action === "issue.cross_issue_influence_cap_rejected")).toHaveLength(1);
+  });
+
+  async function seedUnassignedRun() {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const runId = randomUUID();
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `C${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Recovery Runner",
+      role: "engineer",
+      adapterType: "opencode_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      status: "running",
+      // No issueId/taskId: this is an unassigned timer/on-demand wake.
+      contextSnapshot: {},
+    });
+    return { companyId, agentId, runId };
+  }
+
+  it("attributes an unassigned run to the issue it has checked out", async () => {
+    const { companyId, agentId, runId } = await seedUnassignedRun();
+    const issueId = randomUUID();
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Orphaned recovery target",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+      checkoutRunId: runId,
+    });
+
+    const decision = await observeCrossIssueInfluence(db, {
+      companyId,
+      runId,
+      agentId,
+      targetIssueId: issueId,
+      targetIssueIdentifier: "REC-1",
+      kind: "update",
+    });
+
+    // The checked-out issue is the run's own source, so the write is not a
+    // cross-issue influence and is allowed (the observer returns null).
+    expect(decision).toBeNull();
+  });
+
+  it("still refuses an unassigned run with no checked-out issue", async () => {
+    const { companyId, agentId, runId } = await seedUnassignedRun();
+    await expect(
+      observeCrossIssueInfluence(db, {
+        companyId,
+        runId,
+        agentId,
+        targetIssueId: randomUUID(),
+        targetIssueIdentifier: "REC-2",
+        kind: "update",
+      }),
+    ).rejects.toThrow();
   });
 });

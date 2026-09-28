@@ -1,6 +1,6 @@
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { activityLog, heartbeatRuns } from "@paperclipai/db";
+import { activityLog, heartbeatRuns, issues } from "@paperclipai/db";
 import { isUuidLike, issueWriteDenialResponse } from "@paperclipai/shared";
 import type { CrossIssueInfluenceRunContextReason } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
@@ -116,7 +116,28 @@ export async function observeCrossIssueInfluence(
       throw crossIssueInfluenceRunContextError("run_not_found");
     }
 
-    const sourceIssueId = readRunSourceIssueId(run.contextSnapshot);
+    let sourceIssueId = readRunSourceIssueId(run.contextSnapshot);
+    if (!sourceIssueId) {
+      // A timer/on-demand recovery run carries no primary issue. If it has
+      // checked out (or holds the execution lock on) an issue, that claimed
+      // issue is its real attribution source, so the run can record the task's
+      // disposition instead of being refused after a successful checkout.
+      const claimed = await tx
+        .select({ id: issues.id })
+        .from(issues)
+        .where(
+          and(
+            eq(issues.companyId, input.companyId),
+            or(
+              eq(issues.checkoutRunId, input.runId),
+              eq(issues.executionRunId, input.runId),
+            ),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
+      sourceIssueId = claimed?.id ?? null;
+    }
     // The run exists and is ours, but it carries no task: a timer heartbeat
     // that was never given PAPERCLIP_TASK_ID, with no issue claimed either.
     // This is the case the old copy got wrong — it told the caller to send the

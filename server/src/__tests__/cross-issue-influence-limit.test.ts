@@ -17,9 +17,19 @@ function counterDb(
     select: (selection: Record<string, unknown>) => ({
       from: () => ({
         where: () => {
-          if (Object.keys(selection).includes("count")) {
+          const keys = Object.keys(selection);
+          if (keys.includes("count")) {
             return {
               then: (resolve: (rows: unknown[]) => unknown) => resolve([{ count: observedCount }]),
+            };
+          }
+          if (keys.length === 1 && keys[0] === "id") {
+            // Claimed-issue lookup for an unassigned run: this harness never
+            // checks an issue out, so the run has no attribution source.
+            return {
+              limit: () => ({
+                then: (resolve: (rows: unknown[]) => unknown) => resolve([]),
+              }),
             };
           }
           return {
