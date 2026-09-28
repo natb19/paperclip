@@ -102,7 +102,12 @@ export async function runBlockerFlow(input: {
     checkpoints.push(await settle("final"));
     checks = grade(true);
     await open();
-    await expect(page.getByText(scenario.marker, { exact: false }).first()).toBeVisible();
+    const reply = checkpoints.at(-1)!.comments.find(c => c.authorAgentId === fixtures.agent.id && String(c.body).includes(scenario.marker));
+    expect(reply, "the worker's acknowledgement must be persisted").toBeTruthy();
+    const bubble = page.getByTestId("task-chat-agent-bubble").filter({ hasText: scenario.marker });
+    await expect(bubble).toHaveCount(1);
+    await expect(bubble).toBeVisible();
+    await bubble.scrollIntoViewIfNeeded();
     await input.capture("final-state", "Original worker completed after human answer", "final-state.png");
     assertChecks();
     return { issue: issue!, runs, checks };
