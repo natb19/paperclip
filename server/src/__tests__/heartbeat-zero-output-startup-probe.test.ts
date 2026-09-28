@@ -7,6 +7,8 @@ import {
   agents,
   companies,
   createDb,
+  environmentLeases,
+  environments,
   heartbeatRunEvents,
   heartbeatRuns,
   issues,
@@ -26,7 +28,10 @@ import {
   ADAPTER_NO_OUTPUT_ERROR_CODE,
   ZERO_OUTPUT_STARTUP_PROBE_MS,
   clearTerminalRunIssueLocks,
+  countProviderIdentityFailures,
   heartbeatService,
+  isProviderQuarantineReached,
+  readAgentProviderIdentity,
 } from "../services/heartbeat.ts";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
@@ -58,9 +63,11 @@ describeEmbeddedPostgres("heartbeat zero-output startup probe", () => {
     await db.delete(heartbeatRunEvents);
     await db.delete(activityLog);
     await db.delete(issues);
+    await db.delete(environmentLeases);
     await db.delete(heartbeatRuns);
     await db.delete(agentWakeupRequests);
     await db.delete(agents);
+    await db.delete(environments);
     await db.delete(companies);
   });
 
@@ -148,6 +155,27 @@ describeEmbeddedPostgres("heartbeat zero-output startup probe", () => {
     return { companyId, agentId, runId, wakeupRequestId, issueId };
   }
 
+  async function seedEnvironmentLease(input: {
+    companyId: string;
+    runId: string;
+    driver: string;
+  }) {
+    const environmentId = randomUUID();
+    await db.insert(environments).values({
+      id: environmentId,
+      name: `env-${environmentId}`,
+      driver: input.driver,
+    });
+    await db.insert(environmentLeases).values({
+      companyId: input.companyId,
+      environmentId,
+      heartbeatRunId: input.runId,
+      status: "active",
+      leasePolicy: "ephemeral",
+      provider: input.driver === "local" ? "local" : "daytona",
+    });
+  }
+
   it("fails a run that produced no output past the probe window and releases its lock", async () => {
     const now = new Date("2026-04-01T00:00:00.000Z");
     const { runId, issueId } = await seed({
@@ -168,6 +196,19 @@ describeEmbeddedPostgres("heartbeat zero-output startup probe", () => {
       .where(eq(heartbeatRuns.id, runId))
       .then((rows) => rows[0]);
     expect(run).toEqual({ status: "failed", errorCode: ADAPTER_NO_OUTPUT_ERROR_CODE });
+
+    // The probe stamps the provider identity so the pre-dispatch quarantine
+    // guard can count wedges on the same provider.
+    const stamped = await db
+      .select({ contextSnapshot: heartbeatRuns.contextSnapshot })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0]);
+    expect(stamped.contextSnapshot?.providerIdentity).toBe(
+      readAgentProviderIdentity("opencode_local", {
+        model: "opencode/mimo-v2.6-flash-free",
+      }),
+    );
 
     const lock = await db
       .select({
@@ -250,6 +291,43 @@ describeEmbeddedPostgres("heartbeat zero-output startup probe", () => {
     ).resolves.toEqual([{ status: "running" }]);
   });
 
+  it("leaves a run whose environment is realized on a remote driver alone", async () => {
+    const now = new Date("2026-04-01T00:00:00.000Z");
+    const { companyId, runId } = await seed({
+      processStartedAt: new Date(now.getTime() - ZERO_OUTPUT_STARTUP_PROBE_MS - 1_000),
+    });
+    await seedEnvironmentLease({ companyId, runId, driver: "sandbox" });
+
+    const result = await heartbeatService(db).failZeroOutputRuns({
+      now,
+      probeMs: ZERO_OUTPUT_STARTUP_PROBE_MS,
+    });
+
+    expect(result).toEqual({ scanned: 1, failed: 0, runIds: [] });
+    await expect(
+      db.select({ status: heartbeatRuns.status }).from(heartbeatRuns).where(eq(heartbeatRuns.id, runId)),
+    ).resolves.toEqual([{ status: "running" }]);
+  });
+
+  it("still fails a zero-output run whose leased environment is local", async () => {
+    const now = new Date("2026-04-01T00:00:00.000Z");
+    const { companyId, runId } = await seed({
+      processStartedAt: new Date(now.getTime() - ZERO_OUTPUT_STARTUP_PROBE_MS - 1_000),
+    });
+    await seedEnvironmentLease({ companyId, runId, driver: "local" });
+
+    const result = await heartbeatService(db).failZeroOutputRuns({
+      now,
+      probeMs: ZERO_OUTPUT_STARTUP_PROBE_MS,
+    });
+
+    expect(result.failed).toBe(1);
+    expect(result.runIds).toEqual([runId]);
+    await expect(
+      db.select({ status: heartbeatRuns.status }).from(heartbeatRuns).where(eq(heartbeatRuns.id, runId)),
+    ).resolves.toEqual([{ status: "failed" }]);
+  });
+
   describe("clearTerminalRunIssueLocks", () => {
     it("clears a lock that points at a terminal run", async () => {
       const { companyId, runId, issueId } = await seed({ runStatus: "running" });
@@ -309,5 +387,61 @@ describeEmbeddedPostgres("heartbeat zero-output startup probe", () => {
           .where(eq(issues.id, issueId)),
       ).resolves.toEqual([{ checkoutRunId: runId, executionRunId: runId }]);
     });
+  });
+});
+
+describe("provider quarantine identity", () => {
+  it("collapses models within one provider namespace", () => {
+    expect(
+      readAgentProviderIdentity("opencode_local", { model: "opencode/a" }),
+    ).toBe(
+      readAgentProviderIdentity("opencode_local", { model: "opencode/b" }),
+    );
+  });
+
+  it("distinguishes a different model namespace on the same adapter", () => {
+    expect(
+      readAgentProviderIdentity("opencode_local", { model: "opencode/a" }),
+    ).not.toBe(
+      readAgentProviderIdentity("opencode_local", { model: "opencode-go/a" }),
+    );
+  });
+
+  it("honours an explicit provider over the model namespace", () => {
+    expect(
+      readAgentProviderIdentity("paperclip_runner", {
+        provider: "opencode",
+        model: "ignored/elsewhere",
+      }),
+    ).toBe("paperclip_runner:opencode");
+  });
+
+  it("falls back to the adapter type when no provider is configured", () => {
+    expect(readAgentProviderIdentity("opencode_local", {})).toBe("opencode_local");
+    expect(readAgentProviderIdentity("opencode_local", null)).toBe("opencode_local");
+  });
+
+  it("counts only failures stamped with the same provider identity", () => {
+    const identity = "opencode_local:opencode";
+    const failures = [
+      { contextSnapshot: { providerIdentity: identity } },
+      { contextSnapshot: { providerIdentity: identity } },
+      { contextSnapshot: { providerIdentity: "opencode_local:opencode-go" } },
+      { contextSnapshot: { providerIdentity: null } },
+      { contextSnapshot: null },
+    ];
+    expect(countProviderIdentityFailures(identity, failures)).toBe(2);
+    expect(countProviderIdentityFailures("opencode_local:opencode-go", failures)).toBe(1);
+  });
+
+  it("reaches quarantine only at the configured threshold", () => {
+    const identity = "opencode_local:opencode";
+    const oneFailure = [{ contextSnapshot: { providerIdentity: identity } }];
+    const twoFailures = [
+      ...oneFailure,
+      { contextSnapshot: { providerIdentity: identity } },
+    ];
+    expect(isProviderQuarantineReached(identity, oneFailure)).toBe(false);
+    expect(isProviderQuarantineReached(identity, twoFailures)).toBe(true);
   });
 });

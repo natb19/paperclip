@@ -134,6 +134,7 @@ import {
   documentAnnotationThreads,
   documentRevisions,
   environmentLeases,
+  environments,
   issueDocuments,
   executionWorkspaces,
   heartbeatRunEvents,
@@ -798,6 +799,75 @@ export const ZERO_OUTPUT_STARTUP_PROBE_MS = 120_000;
 // separate from `timeout` so the wedge is visible as its own failure class in
 // the run list and in recovery classification.
 export const ADAPTER_NO_OUTPUT_ERROR_CODE = "adapter_no_output";
+// A provider that wedges repeatedly is not worth re-riding. After this many
+// zero-output failures on the same provider identity within the lookback
+// window, a run routed to that provider is failed immediately as a
+// configuration blocker instead of spawning a process that will hang. This is
+// the recurrence guard DOP-92 asked for: the probe bounds a single wedge to
+// ~2 min, and this stops the recovery retry from rotating back onto the same
+// dead provider at all.
+export const PROVIDER_QUARANTINE_ZERO_OUTPUT_THRESHOLD = 2;
+export const PROVIDER_QUARANTINE_LOOKBACK_MS = 60 * 60 * 1000;
+// The configuration-class error code the quarantine fails with. Recovery
+// already recognizes this code and blocks the task visibly rather than
+// scheduling another automatic retry.
+export const PROVIDER_QUARANTINE_ERROR_CODE = "configuration_incomplete";
+
+function readModelProviderNamespace(model: string | null | undefined): string | null {
+  const value = readNonEmptyString(model);
+  if (!value) return null;
+  const slash = value.indexOf("/");
+  if (slash <= 0 || slash === value.length - 1) return null;
+  return value.slice(0, slash).trim() || null;
+}
+
+/**
+ * Stable identity of "which provider account will run this agent", derived from
+ * the agent's current adapter configuration. Two models on the same provider
+ * namespace share the identity; a different adapter type or model namespace is a
+ * different provider. Mirrors the recovery layer's provider-quota identity so
+ * the quarantine and the retry promotion agree on what "the same provider"
+ * means.
+ */
+export function readAgentProviderIdentity(
+  adapterType: string | null | undefined,
+  adapterConfig: unknown,
+): string {
+  const type = readNonEmptyString(adapterType) ?? "";
+  const config = parseObject(adapterConfig);
+  const explicitProvider = readNonEmptyString(config.provider);
+  if (explicitProvider) return `${type}:${explicitProvider}`;
+  const modelNamespace = readModelProviderNamespace(
+    readNonEmptyString(config.model),
+  );
+  return modelNamespace ? `${type}:${modelNamespace}` : type;
+}
+
+/**
+ * Count how many of the supplied failed runs share `identity` as their stamped
+ * provider identity. Pure so the quarantine threshold is unit-testable without
+ * a database.
+ */
+export function countProviderIdentityFailures(
+  identity: string,
+  failureRows: { contextSnapshot: unknown }[],
+): number {
+  return failureRows.filter(
+    (row) => readNonEmptyString(parseObject(row.contextSnapshot).providerIdentity) === identity,
+  ).length;
+}
+
+/**
+ * True when a provider should be quarantined: at least `threshold` zero-output
+ * wedges on the same provider identity within the lookback window.
+ */
+export function isProviderQuarantineReached(
+  identity: string,
+  failureRows: { contextSnapshot: unknown }[],
+  threshold = PROVIDER_QUARANTINE_ZERO_OUTPUT_THRESHOLD,
+): boolean {
+  return countProviderIdentityFailures(identity, failureRows) >= threshold;
+}
 export const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS = [
   30_000, 30_000,
 ] as const;
@@ -19382,6 +19452,171 @@ export function heartbeatService(
   // Native runs are resolved by the native finalization coordinator, and a run
   // still owned by a live legacy controller is being supervised remotely; both
   // are skipped so the probe cannot preempt their recovery.
+  //
+  // The probe targets the local CLI wedge. A run whose environment is realized
+  // on a remote driver (`ssh`, `sandbox`, or `plugin`) records `processStartedAt`
+  // when its runner child spawns but may then spend far more than the probe
+  // window provisioning before the first streamed log line. That is startup
+  // latency, not a wedge, so remote runs are skipped rather than failed.
+  async function runUsesRemoteExecutionTarget(
+    run: Pick<typeof heartbeatRuns.$inferSelect, "id" | "companyId">,
+  ): Promise<boolean> {
+    const leases = await db
+      .select({ driver: environments.driver })
+      .from(environmentLeases)
+      .innerJoin(
+        environments,
+        eq(environmentLeases.environmentId, environments.id),
+      )
+      .where(
+        and(
+          eq(environmentLeases.companyId, run.companyId),
+          eq(environmentLeases.heartbeatRunId, run.id),
+        ),
+      );
+    return leases.some((lease) =>
+      isRemoteExecutionEnvironmentDriver(lease.driver),
+    );
+  }
+
+  // Count recent zero-output wedges that share the agent's current provider
+  // identity. A provider that has wedged this many times in the lookback window
+  // is broadly failing, and a new run routed to it will simply wedge again.
+  async function readProviderQuarantine(
+    agent: typeof agents.$inferSelect,
+    now: Date,
+  ): Promise<{ identity: string; failureCount: number } | null> {
+    const identity = readAgentProviderIdentity(
+      agent.adapterType,
+      agent.adapterConfig,
+    );
+    const since = new Date(now.getTime() - PROVIDER_QUARANTINE_LOOKBACK_MS);
+    const failures = await db
+      .select({ contextSnapshot: heartbeatRuns.contextSnapshot })
+      .from(heartbeatRuns)
+      .where(
+        and(
+          eq(heartbeatRuns.companyId, agent.companyId),
+          eq(heartbeatRuns.errorCode, ADAPTER_NO_OUTPUT_ERROR_CODE),
+          gte(heartbeatRuns.createdAt, since),
+        ),
+      );
+    const failureCount = countProviderIdentityFailures(identity, failures);
+    if (failureCount < PROVIDER_QUARANTINE_ZERO_OUTPUT_THRESHOLD) return null;
+    return { identity, failureCount };
+  }
+
+  // Fail a run before it spawns when its provider is quarantined. Reuses the
+  // same terminal path as the zero-output probe, but with the configuration
+  // error code recovery already treats as a visible blocker, so no further
+  // automatic retry is scheduled onto the dead provider.
+  async function failRunForProviderQuarantine(
+    run: typeof heartbeatRuns.$inferSelect,
+    agent: typeof agents.$inferSelect,
+    decision: { identity: string; failureCount: number; now: Date },
+  ): Promise<void> {
+    const lookbackMinutes = Math.round(PROVIDER_QUARANTINE_LOOKBACK_MS / 60_000);
+    const message =
+      `Provider "${decision.identity}" produced no adapter output ` +
+      `${decision.failureCount} times in the last ${lookbackMinutes} min; ` +
+      "refusing to route this run to it. Change the agent's model or provider " +
+      "and retry.";
+    const failureWrite = await setRunStatusFromLive(
+      run.id,
+      "failed",
+      ["running", "queued"],
+      {
+        error: message,
+        errorCode: PROVIDER_QUARANTINE_ERROR_CODE,
+        finishedAt: decision.now,
+        contextSnapshot: {
+          ...parseObject(run.contextSnapshot),
+          providerIdentity: decision.identity,
+          providerQuarantinedAt: decision.now.toISOString(),
+          providerQuarantineFailureCount: decision.failureCount,
+        },
+        resultJson: mergeRunStopMetadataForAgent(
+          { adapterType: agent.adapterType, adapterConfig: agent.adapterConfig },
+          "failed",
+          {
+            resultJson: parseObject(run.resultJson),
+            errorCode: PROVIDER_QUARANTINE_ERROR_CODE,
+            errorMessage: message,
+          },
+        ),
+      },
+    );
+    if (!failureWrite.updated || !failureWrite.run) return;
+
+    let finalizedRun: typeof heartbeatRuns.$inferSelect | null =
+      failureWrite.run;
+    await setWakeupStatus(run.wakeupRequestId, "failed", {
+      finishedAt: decision.now,
+      error: message,
+    });
+    finalizedRun =
+      (await classifyAndPersistRunLiveness(
+        finalizedRun,
+        parseObject(finalizedRun.resultJson),
+      )) ?? finalizedRun;
+    await releaseEnvironmentLeasesForRun({
+      runId: finalizedRun.id,
+      companyId: finalizedRun.companyId,
+      agentId: finalizedRun.agentId,
+      status: finalizedRun.status,
+      failureReason: finalizedRun.error ?? undefined,
+    });
+    await releaseIssueExecutionAndPromote(finalizedRun);
+    await appendRunEvent(finalizedRun, {
+      eventType: "lifecycle",
+      stream: "system",
+      level: "error",
+      message: "run failed: provider quarantined after repeated zero-output wedges",
+      payload: {
+        errorCode: PROVIDER_QUARANTINE_ERROR_CODE,
+        providerIdentity: decision.identity,
+        zeroOutputFailureCount: decision.failureCount,
+        lookbackMs: PROVIDER_QUARANTINE_LOOKBACK_MS,
+      },
+    });
+    await finalizeAgentStatus(run.agentId, "failed", message, {
+      wasFirstHeartbeat: timerClaimWasFirstHeartbeat(run),
+    });
+    await startNextQueuedRunForAgent(run.agentId);
+    logger.warn(
+      {
+        runId: run.id,
+        agentId: run.agentId,
+        providerIdentity: decision.identity,
+        zeroOutputFailureCount: decision.failureCount,
+      },
+      "failed a run whose provider is quarantined",
+    );
+  }
+
+  // Fail-open pre-dispatch guard: any error in the check must never block a
+  // healthy run, so it returns false and the caller dispatches normally.
+  async function quarantineRunIfProviderFailing(
+    run: typeof heartbeatRuns.$inferSelect,
+  ): Promise<boolean> {
+    try {
+      if (run.runtimeMode === "native") return false;
+      const agent = await getAgent(run.agentId);
+      if (!agent) return false;
+      const now = new Date();
+      const decision = await readProviderQuarantine(agent, now);
+      if (!decision) return false;
+      await failRunForProviderQuarantine(run, agent, { ...decision, now });
+      return true;
+    } catch (err) {
+      logger.warn(
+        { err, runId: run.id },
+        "provider quarantine check failed; continuing with dispatch",
+      );
+      return false;
+    }
+  }
+
   async function failZeroOutputRuns(opts?: { now?: Date; probeMs?: number }) {
     const now = opts?.now ?? new Date();
     const probeMs = opts?.probeMs ?? ZERO_OUTPUT_STARTUP_PROBE_MS;
@@ -19411,6 +19646,7 @@ export function heartbeatService(
       if (run.runtimeMode === "native") continue;
       if (isNativeRunnerOwnershipHeld(run)) continue;
       if (await hasLiveLegacyController(db, run)) continue;
+      if (await runUsesRemoteExecutionTarget(run)) continue;
 
       const message =
         `No adapter output within ${Math.round(probeMs / 1000)}s of process start; ` +
@@ -19419,6 +19655,12 @@ export function heartbeatService(
         error: message,
         errorCode: ADAPTER_NO_OUTPUT_ERROR_CODE,
         finishedAt: now,
+        // Stamp the provider identity so the pre-dispatch quarantine guard can
+        // count wedges on the same provider across runs and agents.
+        contextSnapshot: {
+          ...parseObject(run.contextSnapshot),
+          providerIdentity: readAgentProviderIdentity(adapterType, adapterConfig),
+        },
         resultJson: mergeRunStopMetadataForAgent(
           { adapterType, adapterConfig },
           "failed",
@@ -20170,6 +20412,12 @@ export function heartbeatService(
       }
       run = claimed;
     }
+
+    // Pre-dispatch circuit breaker for a provider that keeps wedging with no
+    // adapter output. Fails the run as a configuration blocker instead of
+    // spawning a child that will hang. Fail-open: a guard error never blocks a
+    // healthy dispatch.
+    if (await quarantineRunIfProviderFailing(run)) return;
 
     if (
       runOptions.nativeLeaseOwner &&
