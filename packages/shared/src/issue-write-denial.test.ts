@@ -86,6 +86,76 @@ describe("describeIssueWriteDenial", () => {
     expect(copy.sanctionedPath).toContain("PAPERCLIP_RUN_ID");
   });
 
+  it("treats an explicit run_id_missing like the unspecified default", () => {
+    const implicit = describeIssueWriteDenial("cross_issue_influence_run_context_required");
+    const explicit = describeIssueWriteDenial("cross_issue_influence_run_context_required", {
+      runContextReason: "run_id_missing",
+    });
+    expect(explicit).toEqual(implicit);
+  });
+
+  // The regression this split exists for: a run that already sent a valid run
+  // id and holds no task was told to send the run id again, which is both
+  // impossible to satisfy and the wrong root cause.
+  it("does not tell a task-unbound run to send the run id it already sent", () => {
+    const copy = describeIssueWriteDenial("cross_issue_influence_run_context_required", {
+      runContextReason: "run_unbound",
+    });
+    expect(copy.sanctionedPath).not.toContain("X-Paperclip-Run-Id");
+    expect(copy.sanctionedPath).toContain("Do not retry");
+    expect(copy.sanctionedPath).toContain("PAPERCLIP_TASK_ID");
+    expect(copy.boundary).not.toBe("Heartbeat run context");
+    expect(copy.boundary).toContain("no task binding");
+    expect(copy.description).toContain("PAPERCLIP_TASK_ID");
+    expect(copy.description).toContain("unaffected");
+  });
+
+  it("keeps the four run-context reasons on one code with distinct advice", () => {
+    const reasons = [
+      "run_id_missing",
+      "run_id_invalid",
+      "run_not_found",
+      "run_unbound",
+    ] as const;
+    const paths = reasons.map(
+      (runContextReason) =>
+        describeIssueWriteDenial("cross_issue_influence_run_context_required", {
+          runContextReason,
+        }).sanctionedPath,
+    );
+    expect(new Set(paths).size).toBe(reasons.length);
+    // Only the genuinely-missing header should tell the caller to send it.
+    expect(paths.filter((path) => path.includes("X-Paperclip-Run-Id"))).toHaveLength(1);
+  });
+
+  it("tells a stale run id that the run may simply have ended", () => {
+    const copy = describeIssueWriteDenial("cross_issue_influence_run_context_required", {
+      runContextReason: "run_not_found",
+    });
+    expect(copy.sanctionedPath).not.toContain("X-Paperclip-Run-Id");
+    expect(copy.sanctionedPath).toContain("already ended");
+    expect(copy.sanctionedPath).toContain("next heartbeat");
+  });
+
+  it("tells a malformed run id to copy the value verbatim", () => {
+    const copy = describeIssueWriteDenial("cross_issue_influence_run_context_required", {
+      runContextReason: "run_id_invalid",
+    });
+    expect(copy.sanctionedPath).toContain("verbatim");
+    expect(copy.description).toContain("was present");
+  });
+
+  it("surfaces the reason in the API body so clients need not parse prose", () => {
+    const { body } = issueWriteDenialResponse("cross_issue_influence_run_context_required", {
+      runContextReason: "run_unbound",
+    });
+    expect(body.details.reason).toBe("run_unbound");
+    expect(body.error).toContain("no task binding");
+
+    const withoutReason = issueWriteDenialResponse("cross_issue_influence_cap_exceeded");
+    expect(withoutReason.body.details).not.toHaveProperty("reason");
+  });
+
   it("tells a spoof attempt that the write itself was fine", () => {
     const copy = describeIssueWriteDenial("issue_write_attribution_spoof_rejected", {
       actorLabel: "Fable",

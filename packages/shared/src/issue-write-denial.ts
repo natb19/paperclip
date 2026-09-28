@@ -60,6 +60,24 @@ export interface IssueWriteDenialCopy {
   sanctionedPath: string;
 }
 
+/**
+ * Why `cross_issue_influence_run_context_required` fired. All four end in the
+ * same 403 code on purpose — the wire contract and the board UI key on the code
+ * — but they are four different problems, and the old single message was the
+ * "send the run id header" one for all of them. An agent that had *already*
+ * sent the header was told to send it again, which burns runs and points at
+ * the wrong root cause.
+ */
+export type CrossIssueInfluenceRunContextReason =
+  /** No run id on the request at all: the header was missing. */
+  | "run_id_missing"
+  /** Header present, but the value is not a run identifier. */
+  | "run_id_invalid"
+  /** Well-formed id, but no such run for this agent in this company. */
+  | "run_not_found"
+  /** A real run, that carries no task binding to attribute a write to. */
+  | "run_unbound";
+
 export interface IssueWriteDenialContext {
   /** Display name of the agent or user that attempted the write. */
   actorLabel?: string | null;
@@ -75,6 +93,8 @@ export interface IssueWriteDenialContext {
   count?: number | null;
   /** ISO timestamp at which log-only rollout becomes enforcement. */
   enforceAt?: string | null;
+  /** Discriminates the run-context denials, which share one code. */
+  runContextReason?: CrossIssueInfluenceRunContextReason | null;
 }
 
 export function isIssueWriteDenialCode(
@@ -244,23 +264,89 @@ export function describeIssueWriteDenial(
       };
     }
 
-    case "cross_issue_influence_run_context_required":
-      return {
-        code,
-        status: 403,
-        tone: "boundary",
-        boundary: "Heartbeat run context",
-        title: "Cross-issue writes need a run to attribute them to",
-        description:
-          `Every agent comment and task update is attributed to a heartbeat run so the ` +
-          `cross-issue cap can be counted and the audit trail can name who acted for whom. ` +
-          `This request arrived without a valid run, so it could not be contained.`,
-        whoCanAct: `${actor}, once the request carries its own run id.`,
-        sanctionedPath:
-          `Send the \`X-Paperclip-Run-Id\` header with your current run (\`$PAPERCLIP_RUN_ID\`) ` +
-          `and retry.`,
+    case "cross_issue_influence_run_context_required": {
+      // The run id is the easy thing to reach for, so this code used to tell
+      // every caller to send it — including the callers already sending it.
+      // Split by reason: a real run with no task binding cannot be fixed by any
+      // header, and saying otherwise sent agents into retry loops.
+      switch (context.runContextReason) {
+        case "run_id_invalid":
+          return {
+            code,
+            status: 403,
+            tone: "boundary",
+            boundary: "Heartbeat run context",
+            title: "The run id on this request is not a run id",
+            description:
+              `The \`X-Paperclip-Run-Id\` header was present, but its value is not a ` +
+              `shape the control plane can look up, so this write could not be attributed ` +
+              `to a heartbeat run.`,
+            whoCanAct: `${actor}, once the request carries a well-formed run id.`,
+            sanctionedPath:
+              `Send the header with \`$PAPERCLIP_RUN_ID\` copied verbatim — do not ` +
+              `hand-build, reformat, or re-trim the value — and retry.`,
+          };
 
-      };
+        case "run_not_found":
+          return {
+            code,
+            status: 403,
+            tone: "boundary",
+            boundary: "Heartbeat run context",
+            title: "That run id is not one of this agent's live runs",
+            description:
+              `The header carried a well-formed run id, but no run matching it exists for ` +
+              `${actor} in this company — it has already ended, or it belongs to a different ` +
+              `agent. There is no heartbeat run to attribute this write to, so resending the ` +
+              `same value cannot help.`,
+            whoCanAct: `${actor}, on a live run of its own.`,
+            sanctionedPath:
+              `Read \`$PAPERCLIP_RUN_ID\` fresh at write time. If the run has already ended, ` +
+              `end it and continue on the next heartbeat, which arrives with a new run id.`,
+          };
+
+        case "run_unbound":
+          return {
+            code,
+            status: 403,
+            tone: "boundary",
+            // Distinct boundary on purpose: "no task binding" and "wrong run id"
+            // are different problems and must not read as one banner.
+            boundary: "Run has no task binding",
+            title: "This run is not bound to a task, so it cannot record a disposition",
+            description:
+              `This run has no task binding — \`PAPERCLIP_TASK_ID\` is empty, the normal ` +
+              `state for a timer heartbeat — so there is no source task for the cross-issue ` +
+              `counter and the audit trail to attribute a status or comment write to. The run ` +
+              `id was accepted; it simply names a run that holds no task. Task documents, work ` +
+              `products, interactions, and issue creation are unaffected by this boundary.`,
+            whoCanAct: `${actor}, on its next task-bound run.`,
+            sanctionedPath:
+              `Do not retry this write, and do not resend the run id — retrying cannot bind a ` +
+              `task to a run that started without one. Wait for a task-bound wake (a run with ` +
+              `\`PAPERCLIP_TASK_ID\` set, or an issue monitor wake) and record the outcome then. ` +
+              `To route the request from this run instead, ${CHILD_ISSUE_PATH}.`,
+          };
+
+        case "run_id_missing":
+        default:
+          return {
+            code,
+            status: 403,
+            tone: "boundary",
+            boundary: "Heartbeat run context",
+            title: "Cross-issue writes need a run to attribute them to",
+            description:
+              `Every agent comment and task update is attributed to a heartbeat run so the ` +
+              `cross-issue cap can be counted and the audit trail can name who acted for whom. ` +
+              `This request arrived without a valid run, so it could not be contained.`,
+            whoCanAct: `${actor}, once the request carries its own run id.`,
+            sanctionedPath:
+              `Send the \`X-Paperclip-Run-Id\` header with your current run (\`$PAPERCLIP_RUN_ID\`) ` +
+              `and retry.`,
+          };
+      }
+    }
 
     case "issue_write_attribution_spoof_rejected":
       return {
@@ -314,6 +400,8 @@ export function issueWriteDenialResponse(
       boundary: string;
       whoCanAct: string;
       sanctionedPath: string;
+      /** Present on the run-context denials, which share one code. */
+      reason?: CrossIssueInfluenceRunContextReason;
     } & Record<string, unknown>;
   };
 } {
@@ -327,6 +415,11 @@ export function issueWriteDenialResponse(
         boundary: copy.boundary,
         whoCanAct: copy.whoCanAct,
         sanctionedPath: copy.sanctionedPath,
+        // Machine-readable twin of the prose: one code, four causes, so a
+        // client that wants to branch without parsing sentences reads this.
+        ...(context.runContextReason
+          ? { reason: context.runContextReason }
+          : {}),
       },
     },
   };

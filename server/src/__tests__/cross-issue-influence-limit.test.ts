@@ -177,7 +177,10 @@ describe("cross-issue influence limit rollout", () => {
       kind: "comment",
     })).rejects.toMatchObject({
       status: 403,
-      details: { code: "cross_issue_influence_run_context_required" },
+      details: {
+        code: "cross_issue_influence_run_context_required",
+        reason: "run_not_found",
+      },
     });
     expect(fake.inserted).toEqual([]);
   });
@@ -193,7 +196,10 @@ describe("cross-issue influence limit rollout", () => {
       kind: "comment",
     })).rejects.toMatchObject({
       status: 403,
-      details: { code: "cross_issue_influence_run_context_required" },
+      details: {
+        code: "cross_issue_influence_run_context_required",
+        reason: "run_id_invalid",
+      },
     });
     expect(fake.inserted).toEqual([]);
   });
@@ -209,8 +215,36 @@ describe("cross-issue influence limit rollout", () => {
       kind: "update",
     })).rejects.toMatchObject({
       status: 403,
-      details: { code: "cross_issue_influence_run_context_required" },
+      details: {
+        code: "cross_issue_influence_run_context_required",
+        // The reported defect: a real, correctly-attributed run that holds no
+        // task, not a missing or wrong run id.
+        reason: "run_unbound",
+      },
     });
     expect(fake.inserted).toEqual([]);
+  });
+
+  // Regression for the original report on DOP-79: the advice given to a
+  // task-unbound timer heartbeat was "send X-Paperclip-Run-Id", which that run
+  // had already done. Two earlier passes burned runs following it and one
+  // reached the wrong root cause entirely.
+  it("does not tell a task-unbound run to resend the run id it already sent", async () => {
+    const fake = counterDb(0, { contextSnapshot: {} });
+
+    const error = await observeCrossIssueInfluence(fake.db as never, {
+      companyId: "22222222-2222-4222-8222-222222222222",
+      runId: "11111111-1111-4111-8111-111111111111",
+      agentId: "33333333-3333-4333-8333-333333333333",
+      targetIssueId: "55555555-5555-4555-8555-555555555555",
+      kind: "update",
+    }).then(
+      () => null,
+      (err: { details: { sanctionedPath: string; boundary: string } }) => err.details,
+    );
+
+    expect(error?.sanctionedPath).not.toContain("X-Paperclip-Run-Id");
+    expect(error?.sanctionedPath).toContain("Do not retry");
+    expect(error?.boundary).toContain("no task binding");
   });
 });

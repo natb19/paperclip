@@ -168,6 +168,7 @@ export {
   type IssueWriteDenialCode,
   type IssueWriteDenialContext,
   type IssueWriteDenialCopy,
+  type CrossIssueInfluenceRunContextReason,
   type IssueWriteDenialTone,
 } from "./issue-write-denial.js";
 export {

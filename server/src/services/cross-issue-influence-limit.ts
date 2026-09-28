@@ -2,6 +2,7 @@ import { and, count, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { activityLog, heartbeatRuns } from "@paperclipai/db";
 import { isUuidLike, issueWriteDenialResponse } from "@paperclipai/shared";
+import type { CrossIssueInfluenceRunContextReason } from "@paperclipai/shared";
 import { forbidden } from "../errors.js";
 import { logger } from "../middleware/logger.js";
 
@@ -27,10 +28,16 @@ export type CrossIssueInfluenceDecision = {
   enforceAt: string;
 };
 
-export function crossIssueInfluenceRunContextError() {
+export function crossIssueInfluenceRunContextError(
+  reason: CrossIssueInfluenceRunContextReason = "run_id_missing",
+) {
   // Copy comes from the shared issue-write denial contract (the open cross-task write design (failure UX))
-  // so the agent reading this 403 is told the fix, not just the refusal.
-  const { body } = issueWriteDenialResponse("cross_issue_influence_run_context_required");
+  // so the agent reading this 403 is told the fix, not just the refusal. The
+  // reason matters as much as the code: "send the run id" is the wrong advice
+  // for a run that already sent one and holds no task.
+  const { body } = issueWriteDenialResponse("cross_issue_influence_run_context_required", {
+    runContextReason: reason,
+  });
   return forbidden(body.error, body.details);
 }
 
@@ -82,7 +89,7 @@ export async function observeCrossIssueInfluence(
 ): Promise<CrossIssueInfluenceDecision | null> {
   // API-key callers control the run header. Reject malformed UUIDs before the
   // database can turn an untrusted identifier into a PostgreSQL cast error.
-  if (!isUuidLike(input.runId)) throw crossIssueInfluenceRunContextError();
+  if (!isUuidLike(input.runId)) throw crossIssueInfluenceRunContextError("run_id_invalid");
 
   return db.transaction(async (tx) => {
     const run = await tx
@@ -106,11 +113,16 @@ export async function observeCrossIssueInfluence(
       run.companyId !== input.companyId ||
       run.agentId !== input.agentId
     ) {
-      throw crossIssueInfluenceRunContextError();
+      throw crossIssueInfluenceRunContextError("run_not_found");
     }
 
     const sourceIssueId = readRunSourceIssueId(run.contextSnapshot);
-    if (!sourceIssueId) throw crossIssueInfluenceRunContextError();
+    // The run exists and is ours, but it carries no task: a timer heartbeat
+    // that was never given PAPERCLIP_TASK_ID, with no issue claimed either.
+    // This is the case the old copy got wrong — it told the caller to send the
+    // run id, which this run had already done, and which cannot bind a task
+    // retroactively. Name it instead.
+    if (!sourceIssueId) throw crossIssueInfluenceRunContextError("run_unbound");
     if (
       sourceIssueId === input.targetIssueId ||
       (input.targetIssueIdentifier && sourceIssueId.toUpperCase() === input.targetIssueIdentifier.toUpperCase())
