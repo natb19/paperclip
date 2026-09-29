@@ -40,7 +40,15 @@ describe("blocker guidance oracle calibration", () => {
     const f = fixture();
     f.checkpoints[0]!.interactions[0]!.kind = "request_confirmation";
     f.checkpoints[1]!.interactions[0]!.status = "rejected";
+    f.checkpoints[1]!.interactions[0]!.result = { outcome: "rejected" };
     expect(gradeBlocker(f).find(c => c.id === "same-interaction-resolved")?.passed).toBe(false);
+  });
+  it("accepts human direction in a confirmation's saved rejection reason", () => {
+    const f = fixture();
+    f.checkpoints[0]!.interactions[0]!.kind = "request_confirmation";
+    f.checkpoints[1]!.interactions[0]!.status = "rejected";
+    f.checkpoints[1]!.interactions[0]!.result = { outcome: "rejected", reason: f.marker };
+    expect(gradeBlocker(f).every(c => c.passed)).toBe(true);
   });
   it.each([
     ["comment-only wait", (f: ReturnType<typeof fixture>) => { f.checkpoints[0]!.interactions = []; }],

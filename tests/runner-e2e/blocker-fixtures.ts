@@ -3,11 +3,16 @@ import { prepareLegacyContinuationSkill } from "./continuation-fixtures.js";
 import type { RunnerApi } from "./api.js";
 import type { LiveFixtureValues } from "./live-fixtures.js";
 import type { MatrixExecution } from "./types.js";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 
 export async function setupBlockerFixtures(input: {
   api: RunnerApi; fixtures: LiveFixtureValues; execution: MatrixExecution; workspacePath: string; nonce: string;
 }) {
   const { api, fixtures, execution } = input;
+  if (execution.profile.id === "legacy-claude") {
+    await mkdir(path.join(input.workspacePath, ".blocker-provider-home", ".claude"), { recursive: true });
+  }
   const registry = new FixtureRegistry();
   registry.register<{ id: string }>({ id: "manager", async setup() {
     const payload = execution.profile.buildAgent({ environmentId: fixtures.environment.id, environmentFixtureId: "local",

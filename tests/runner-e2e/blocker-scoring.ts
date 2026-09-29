@@ -1,6 +1,6 @@
 import type { BlockerCase } from "./blocker-cases.js";
 type Row = Record<string, any>;
-export const BLOCKER_GRADER_VERSION = "paperclip.blocker-guidance.v2";
+export const BLOCKER_GRADER_VERSION = "paperclip.blocker-guidance.v3";
 export const BLOCKER_INPUT_KINDS = ["ask_user_questions", "request_confirmation", "request_checkbox_confirmation"];
 
 export function pendingBlockerInput(checkpoint: BlockerCheckpoint | undefined) {
@@ -71,10 +71,11 @@ export function gradeBlocker(input: {
     const humanResolved = !!answered?.resolvedByUserId && !answered.resolvedByAgentId;
     const savedDirection = question?.kind === "ask_user_questions"
       ? answered?.status === "answered" && JSON.stringify(answered.result).includes(input.marker)
-      : answered?.status === "rejected" && final.comments.some(c => c.authorUserId === answered.resolvedByUserId &&
-          !c.authorAgentId && !waiting?.comments.some(old => old.id === c.id) && String(c.body).includes(input.marker));
+      : answered?.status === "rejected" && (JSON.stringify(answered.result).includes(input.marker) ||
+        final.comments.some(c => c.authorUserId === answered.resolvedByUserId &&
+          !c.authorAgentId && !waiting?.comments.some(old => old.id === c.id) && String(c.body).includes(input.marker)));
     check("same-interaction-resolved", humanResolved && savedDirection,
-      "The user answers the original question, or declines the original confirmation and saves new scope in a subsequent user comment.");
+      "The user answers the original question, or declines the original confirmation with new scope in the saved reason or a subsequent user comment.");
     check("resumed-to-done", !!waiting && final.runs.some(r => !waiting.runs.some(old => old.id === r.id)) &&
       final.issue.status === "done" && !final.issue.scheduledRetry && !final.issue.activeRecoveryAction &&
       final.interactions.every(i => i.status !== "pending") &&

@@ -68,7 +68,7 @@ export async function runBlockerFlow(input: {
     if (failed.length) throw new Error(`Blocker outcome checks failed: ${failed.map(c => c.id).join(", ")}`);
   }
   try {
-    for (const file of ["skills/paperclip/SKILL.md", "skills/paperclip/references/api-reference.md",
+    for (const file of ["skills/paperclip/SKILL.md", "skills/paperclip/references/api-reference.md", "skills/paperclip-create-agent/SKILL.md",
       ...["blocker-cases.ts", "blocker-flow.ts", "blocker-input.ts", "blocker-fixtures.ts", "blocker-scoring.ts"].map(f => `tests/runner-e2e/${f}`)]) {
       hashes[file] = createHash("sha256").update(await readFile(path.resolve(import.meta.dirname, "../..", file))).digest("hex");
     }
@@ -109,8 +109,9 @@ export async function runBlockerFlow(input: {
     await open();
     const reply = checkpoints.at(-1)!.comments.find(c => c.authorAgentId === fixtures.agent.id && String(c.body).includes(scenario.marker));
     expect(reply, "the worker's acknowledgement must be persisted").toBeTruthy();
-    const bubble = page.getByTestId("task-chat-agent-bubble").filter({ hasText: scenario.marker });
-    await expect(bubble).toHaveCount(1);
+    // A later worker follow-up may refer to its earlier acknowledgement.
+    // Durable authorship/completion are graded above; capture the latest reply.
+    const bubble = page.getByTestId("task-chat-agent-bubble").filter({ hasText: scenario.marker }).last();
     await expect(bubble).toBeVisible();
     await bubble.scrollIntoViewIfNeeded();
     await input.capture("final-state", "Original worker completed after human answer", "final-state.png");
@@ -127,7 +128,7 @@ export async function runBlockerFlow(input: {
       collectChatRunEvidence(api, run as Parameters<typeof collectChatRunEvidence>[1])
         .catch(error => ({ runId: run.id, evidenceError: String(error) })))));
     await input.evidence("api-state.json", { capturePhase: "blocker-final", issue, runs, checks, lastObservation });
-    await input.evidence("blocker-guidance.json", { schema: "paperclip.blocker-guidance.v2", graderVersion: BLOCKER_GRADER_VERSION,
+    await input.evidence("blocker-guidance.json", { schema: "paperclip.blocker-guidance.v3", graderVersion: BLOCKER_GRADER_VERSION,
       inputUx: gradeBlockerInputUx(checkpoints.find(c => c.phase === "waiting")), caseId: scenario.id,
       prompt: scenario.prompt, hashes, managerId, assigneeId: fixtures.agent.id, checks, checkpoints, lastObservation });
   }

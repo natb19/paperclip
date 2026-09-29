@@ -33,9 +33,13 @@ export async function answerBlockerThroughUi(page: Page, interaction: Record<str
   if (interaction.payload.rejectRequiresReason || interaction.payload.allowDeclineReason || interaction.payload.declineReasonPlaceholder) {
     await page.locator(`[id="${interaction.id}-reject-reason"]`).fill(answer);
     await reject.click();
+    await expect(reject).not.toBeVisible();
+    // wake_assignee resumes rejected confirmations too. The saved reason
+    // carries the new scope; posting it again would cause a second wake.
+    return;
   }
   await expect(reject).not.toBeVisible();
-  // Declining alone does not wake the assignee. A normal user comment saves the
-  // new scope and wakes it through the production path, within the four-run cap.
+  // This card has no reason field. Save the new scope in a normal user comment;
+  // both resolution and comment wakes remain within the four-run cap.
   await submitTaskReply(page, answer);
 }

@@ -1070,8 +1070,8 @@ Resolver governance:
 
 Rules:
 
-- `continuationPolicy: "wake_assignee"` wakes the assignee only after a `request_confirmation` is accepted.
-- Rejection does not wake the assignee by default. The board/user can add a normal comment when revisions are needed.
+- `continuationPolicy: "wake_assignee"` resumes the assignee when a confirmation is accepted or rejected. A saved rejection reason can carry the revised direction; do not duplicate it in a second comment solely to wake the agent again.
+- `wake_assignee_on_accept` resumes only on acceptance. If a card has no reason field, the board/user can add a normal comment with revised direction.
 - Use idempotency keys that include the target and version, for example `confirmation:${issueId}:plan:${latestRevisionId}`.
 - Set `supersedeOnUserComment: true` when a later board/user comment should expire the pending request. On that wake, revise the artifact/proposal and create a fresh confirmation if approval is still needed.
 - A pending interaction is an explicit waiting path. Before ending the heartbeat, update the source issue into a visible waiting posture, normally `in_review`, and leave a comment that names the response needed and the effective audience.

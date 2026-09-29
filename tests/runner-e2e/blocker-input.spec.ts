@@ -20,7 +20,7 @@ test("answers every page of a saved question set", async ({ page }) => {
 
 for (const kind of ["request_confirmation", "request_checkbox_confirmation"]) {
   for (const reason of [true, false]) {
-    test(`declines ${kind} and posts scope change (reason=${reason})`, async ({ page }) => {
+    test(`declines ${kind} with saved scope change (reason=${reason})`, async ({ page }) => {
       await page.setContent(`<div id="card"><button id="decline">Cancel request</button>
         <button id="accept" onclick="window.accepted = true">Approve</button></div>
         <script>
@@ -38,7 +38,7 @@ for (const kind of ["request_confirmation", "request_checkbox_confirmation"]) {
         rejectLabel: "Cancel request", allowDeclineReason: reason,
       } }, "Change of scope");
       expect(await page.evaluate(() => ({ accepted: (window as any).accepted, reply: (window as any).reply })))
-        .toEqual({ accepted: false, reply: "Change of scope" });
+        .toEqual({ accepted: false, reply: reason ? undefined : "Change of scope" });
       if (reason) expect(await page.evaluate(() => (window as any).reason)).toBe("Change of scope");
     });
   }

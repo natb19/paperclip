@@ -1335,8 +1335,8 @@ preserved ownership including activity history, no extra tasks or manager runs,
 and no hire. After reload, the browser supplies a unique scope-change marker.
 The same worker must consume the saved answer, acknowledge it, and finish the
 same task. Question sets may contain multiple questions. For a confirmation,
-the browser declines the proposed action and posts the new scope as a normal
-user comment; declining alone does not wake the assignee. The grader requires
+the browser declines the proposed action with the new scope in its reason field,
+or posts a normal user comment if the card has no reason field. The grader requires
 human resolution of the original card and the saved user direction. It never
 approves an administrator or hiring action to get a passing result.
 Missing evidence fails. Calibration covers plausible wrong outcomes.
@@ -1356,14 +1356,18 @@ contribute to the existing billing contract. Evidence includes the waiting and
 final task screenshots, saved checkpoints, final observations, source revision,
 profile/model, catalog digest, and SHA-256 fingerprints of both changed skill
 files and the grader/flow in `snapshots/blocker-guidance.json`. Grader version
-`paperclip.blocker-guidance.v2` accepts supported confirmations and multiple
+`paperclip.blocker-guidance.v3` accepts supported confirmations and multiple
 questions, verifies human resolution, and records `inputUx` separately from
 the blocking checks. Direct text input is the preferred UX for these open-ended
 requests; a valid confirmation can satisfy the waiting contract while losing
-that UX dimension. Version 1 results retain their original stricter grades.
+that UX dimension. Earlier results retain their original grades. Version 2
+diagnostics exposed local Claude skill shadowing and a redundant browser reply
+after confirmation rejection; do not treat those as clean PR measurements.
 Use distinct campaign IDs for independent repetitions; do not overwrite an
 earlier campaign or treat repeated samples as infrastructure retries. Use the normal
 Product E2E report generator; retained failed attempts are part of the result.
 Before dispatch, the fixture verifies that both served company skill files match
 the evaluated checkout byte for byte. The skill snapshot and provider run evidence
 are retained privately alongside the grading checkpoints for failure diagnosis.
+Claude receives a fresh provider home and config directory inside the disposable
+workspace so a user's installed skill cannot shadow the managed skill under test.
