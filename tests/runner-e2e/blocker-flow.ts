@@ -49,7 +49,8 @@ export async function runBlockerFlow(input: {
       load: () => state(phase), accept: s => {
         const idle = s.runs.length > 0 && s.runs.every(r => ["succeeded", "failed", "timed_out", "cancelled"].includes(r.status)) &&
           !s.issue.scheduledRetry && !s.issue.activeRecoveryAction;
-        const ready = idle && (phase === "waiting" || s.issue.status === "done");
+        const waitingRuns = checkpoints.find(c => c.phase === "waiting")?.runs ?? [];
+        const ready = idle && (phase === "waiting" || s.runs.some(r => !waitingRuns.some(old => old.id === r.id)));
         const key = ready ? JSON.stringify([s.issue.status, s.runs.map(r => [r.id, r.status]), s.interactions.map(i => [i.id, i.status])]) : "";
         const stable = !!key && key === lastKey;
         lastKey = key;
@@ -107,6 +108,7 @@ export async function runBlockerFlow(input: {
     checkpoints.push(await settle("final"));
     checks = grade(true);
     await open();
+    assertChecks();
     const reply = checkpoints.at(-1)!.comments.find(c => c.authorAgentId === fixtures.agent.id && String(c.body).includes(scenario.marker));
     expect(reply, "the worker's acknowledgement must be persisted").toBeTruthy();
     // A later worker follow-up may refer to its earlier acknowledgement.

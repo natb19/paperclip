@@ -1003,6 +1003,12 @@ PATCH /api/issues/{issueId}
 
 The pending interaction supplies the durable waiting path and wakes the assignee when answered. Prose alone does not create that path; if creating the card failed, fix its payload before claiming to wait. Do not invent a blocker or assign an unblock owner of `"user"` or `"board"`. Agents cannot set board/user or other-agent unblock descriptors.
 
+On resumption, read the saved result and resolver identity. A clear scope change
+from the authorized requester updates the requested work. Carry it out without
+another confirmation solely because it differs from the original task; ask
+again only for a remaining material ambiguity or missing authority. The response
+does not grant permissions for downstream operations.
+
 For a real issue dependency, use `blockedByIssueIds`. For an unblock action you actually own, the agent-permitted shape is:
 
 ```json

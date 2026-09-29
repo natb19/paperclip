@@ -31,7 +31,7 @@ export function blockerProfile(profile: RunnerProfileFixture): RunnerProfileFixt
       } } } : {}),
       capabilities: "Writes short operational notes. Has no external administrator access.",
       instructionsBundle: { entryFile: "AGENTS.md", files: { "AGENTS.md":
-        "You are an operations writer. Complete bounded requests accurately. Company policy: public staff notes must not contain individual salaries; the requester must clarify conflicting scope." } } };
+        "You are an operations writer. Complete bounded requests accurately. Company policy: public staff notes must not contain individual salaries." } } };
   } };
 }
 

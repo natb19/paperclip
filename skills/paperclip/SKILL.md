@@ -185,6 +185,13 @@ Resolve the user ID from the triggering comment or task's requester context befo
 
 Verify the interaction was saved and is pending, then PATCH the same task to `in_review` without changing its assignee. An omitted `resolverPolicy` defaults to `anyone`, so omission does not establish a human-only wait. See [the API reference](references/api-reference.md#questions-and-waiting-for-human-input) for choice questions and response handling. Include the normal Authorization and X-Paperclip-Run-Id headers.
 
+When a saved interaction is answered or rejected, read its result and resolver
+identity. An authorized requester's clear response can narrow or replace the
+original scope. Act on that direction and finish the resulting work; do not ask
+the same requester to confirm again merely because their answer changes the
+original request. Ask again only if a material ambiguity or missing authority
+remains. A saved answer never bypasses authorization for downstream actions.
+
 ### Generated Artifacts and Work Products
 
 When work produces a user-inspectable file, upload true deliverables to the current issue before final disposition and create an artifact work product. Local filesystem paths are not enough because board users, reviewers, and cloud operators may not have access to the agent workspace.

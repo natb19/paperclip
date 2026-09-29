@@ -15,6 +15,17 @@ function fixture() {
   return { caseId: "requester-scope" as const, assigneeId: "worker", managerId: "manager", marker: "DECISION_test", checkpoints: [waiting, final] };
 }
 describe("blocker guidance oracle calibration", () => {
+  it("isolates Claude's skill home without replacing the provider secret reference", () => {
+    const cell = runnerMatrix.find(c => c.suite.id === "blocker-guidance" && c.profile.id === "legacy-claude")!;
+    const ref = { type: "secret_ref" as const, secretId: "22222222-2222-4222-8222-222222222222", version: "latest" as const };
+    const agent = cell.profile.buildAgent({ environmentId: "env", environmentFixtureId: "local",
+      workspacePath: "/tmp/blocker-fixture", executionId: "isolation", secretRefs: { ANTHROPIC_API_KEY: ref } });
+    expect(agent.adapterConfig).toMatchObject({ env: {
+      HOME: "/tmp/blocker-fixture/.blocker-provider-home",
+      CLAUDE_CONFIG_DIR: "/tmp/blocker-fixture/.blocker-provider-home/.claude",
+      ANTHROPIC_API_KEY: ref,
+    } });
+  });
   it("uses an alphanumeric decision marker that rich Markdown cannot escape", () => {
     expect(blockerScenario("human-authority", "nonce-1").marker).toMatch(/^[A-Z0-9]+$/i);
   });
