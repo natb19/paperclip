@@ -7,6 +7,7 @@ import { blockerScenario } from "./blocker-cases.js";
 import { setupBlockerFixtures } from "./blocker-fixtures.js";
 import { BLOCKER_GRADER_VERSION, gradeBlocker, gradeBlockerInputUx, pendingBlockerInput, type BlockerCheckpoint } from "./blocker-scoring.js";
 import { answerBlockerThroughUi } from "./blocker-input.js";
+import { collectChatRunEvidence } from "./chat-flow.js";
 import type { LiveFixtureValues } from "./live-fixtures.js";
 import type { MatrixExecution } from "./types.js";
 import { createTaskThroughUi } from "./user-actions.js";
@@ -73,6 +74,18 @@ export async function runBlockerFlow(input: {
     }
     const setup = await setupBlockerFixtures(input);
     managerId = setup.manager.id;
+    const skill = (await api.get<Row[]>(`${company}/skills`)).find(s => s.key === "paperclipai/paperclip/paperclip");
+    if (!skill) throw new Error("Missing assigned operational skill");
+    const servedHashes: Record<string, string> = {};
+    for (const file of ["SKILL.md", "references/api-reference.md"]) {
+      const served = await api.get<{ content: string }>(`${company}/skills/${skill.id}/files?path=${encodeURIComponent(file)}`);
+      servedHashes[`skills/paperclip/${file}`] = createHash("sha256").update(served.content).digest("hex");
+    }
+    await input.evidence("blocker-skill-source.json", { skillId: skill.id, servedHashes,
+      agentSkills: await api.get(`/api/agents/${fixtures.agent.id}/skills`) });
+    for (const [file, hash] of Object.entries(servedHashes)) {
+      if (hash !== hashes[file]) throw new Error(`Bundled operational skill differs from evaluated source: ${file}`);
+    }
     await api.patch("/api/instance/settings/experimental", { enableClassicTaskInterface: false });
     await createTaskThroughUi({ page, issuePrefix: fixtures.company.issuePrefix!, agentName: fixtures.agent.name,
       title: execution.task.buildTitle(input.nonce), prompt: scenario.prompt, workMode: "standard" });
@@ -110,6 +123,9 @@ export async function runBlockerFlow(input: {
   } finally {
     let lastObservation: unknown;
     if (issue) lastObservation = await state("final").catch(error => ({ evidenceError: String(error) }));
+    await input.evidence("blocker-runs.json", await Promise.all(runs.map(run =>
+      collectChatRunEvidence(api, run as Parameters<typeof collectChatRunEvidence>[1])
+        .catch(error => ({ runId: run.id, evidenceError: String(error) })))));
     await input.evidence("api-state.json", { capturePhase: "blocker-final", issue, runs, checks, lastObservation });
     await input.evidence("blocker-guidance.json", { schema: "paperclip.blocker-guidance.v2", graderVersion: BLOCKER_GRADER_VERSION,
       inputUx: gradeBlockerInputUx(checkpoints.find(c => c.phase === "waiting")), caseId: scenario.id,

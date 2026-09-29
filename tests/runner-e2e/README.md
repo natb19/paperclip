@@ -1364,3 +1364,6 @@ that UX dimension. Version 1 results retain their original stricter grades.
 Use distinct campaign IDs for independent repetitions; do not overwrite an
 earlier campaign or treat repeated samples as infrastructure retries. Use the normal
 Product E2E report generator; retained failed attempts are part of the result.
+Before dispatch, the fixture verifies that both served company skill files match
+the evaluated checkout byte for byte. The skill snapshot and provider run evidence
+are retained privately alongside the grading checkpoints for failure diagnosis.
