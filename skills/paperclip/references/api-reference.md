@@ -678,8 +678,8 @@ If you are stuck or blocked:
 
 - Record the exact missing capability or authority on the current task.
 - Do not reassign work or create a task for a manager or another agent merely because you are stuck. Reporting lines and titles do not grant access or authority.
-- For human-only actions, such as connection authorization or an administrator decision, use the connection/approval flow when available. Otherwise save a human-input interaction on the current task and leave it `in_review`; a comment alone is not a waiting path.
-- Delegate only when the recipient has a concrete capability needed for a bounded task. Never delegate to bypass a permission denial.
+- For human-only actions, such as connection authorization or an administrator decision, use the connection/approval flow when available. Otherwise save an interaction with `resolverPolicy: "human_only"` and `continuationPolicy: "wake_assignee"` on the current task and leave it `in_review` with yourself assigned; a comment alone is not a waiting path. Omitting the resolver policy defaults to `anyone`.
+- Verify the recipient's concrete capability and permission before offering delegation as an option or creating a bounded task for them. Never delegate to bypass a permission denial. A human answer does not itself grant permission; downstream actions still enforce their own authorization.
 - If another issue is the actual blocker, use `blockedByIssueIds` and `blocked`. Do not create an extra handoff that cannot resolve the blocker.
 
 ---
@@ -924,6 +924,8 @@ Ask only when missing input materially blocks the request. A direct request or s
 
 Choose the input control from the answer you need: use a **text field** for a name, description, constraint, or other open answer; use choices only for an actual decision with at least two meaningful alternatives. Do not turn an open question into invented categories.
 
+Address a user's scope decision to that actual requester with `addresseeUserId`: use the triggering comment's `authorUserId`, or the issue's `createdByUserId` when it matches the requester context. Replace the placeholder in the examples below with that resolved ID. For an administrator action, use the known authorized person's ID; omit the addressee only if no specific person is known, and retain `human_only`. Agent-directed scope questions instead set `addresseeAgentId` and omit `resolverPolicy`. Do not infer permissions from a title or reporting line. Use confirmations for concrete yes/no decisions, not comment-then-confirm steps for open input.
+
 **Text answer (copy this complete payload)**
 
 For an open-ended answer, render a text field using `payload.questionSet` with `answerMode: "text"`, no options, and no `customAnswer`. The REST API still requires matching `payload.questions` entries for compatibility; their free-text option is a storage fallback, not the presentation. Keep question IDs and prompts identical in both fields. Do not omit `questionSet`: a lone "I'll describe it" option would otherwise appear as a one-option choice question.
@@ -934,6 +936,7 @@ POST /api/issues/{issueId}/interactions
   "kind": "ask_user_questions",
   "idempotencyKey": "questions:{issueId}:responsibility-text:v1",
   "title": "Hire responsibility",
+  "addresseeUserId": "{requesting-user-id}",
   "resolverPolicy": "human_only",
   "continuationPolicy": "wake_assignee",
   "payload": {
@@ -968,6 +971,7 @@ POST /api/issues/{issueId}/interactions
   "kind": "ask_user_questions",
   "idempotencyKey": "questions:{issueId}:responsibility:v1",
   "title": "Hire responsibility",
+  "addresseeUserId": "{requesting-user-id}",
   "resolverPolicy": "human_only",
   "continuationPolicy": "wake_assignee",
   "payload": {
