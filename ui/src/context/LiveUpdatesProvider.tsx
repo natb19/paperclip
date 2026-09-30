@@ -1289,6 +1289,7 @@ function invalidateActivityQueries(
   }
 
   if (entityType === "issue") {
+    queryClient.invalidateQueries({ queryKey: ["agent-chats", companyId] });
     if (action === "issue.tree_hold_created" || action === "issue.tree_hold_released" || action === "issue.updated") {
       // An ancestor hold or reparenting changes descendants' effective pause.
       queryClient.invalidateQueries({ queryKey: ["issues", "tree-control-state"] });

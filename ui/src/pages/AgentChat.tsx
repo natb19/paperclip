@@ -56,6 +56,7 @@ export function AgentChat() {
       const issue = await promise;
       client.setQueryData(queryKeys.issues.detail(issue.id), issue);
       client.setQueryData(chatKey, issue);
+      void client.invalidateQueries({ queryKey: queryKeys.agentChats.list(selectedCompanyId, userId) });
       return issue;
     } catch (error) {
       creating.current = null;

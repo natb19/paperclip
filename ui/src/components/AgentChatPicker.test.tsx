@@ -54,6 +54,22 @@ describe("AgentChatPicker", () => {
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("distinguishes existing conversations and selects the same agent when reopened", async () => {
+    await render({ existingChatAgentIds: ["first"] });
+    expect(options()[0].textContent).toContain("Open chat");
+    expect(options()[1].textContent).toContain("New chat");
+    await search("designer");
+    await act(async () => options()[0].click());
+    expect(props.onSelect).toHaveBeenLastCalledWith(agents[1]);
+    await render({ open: false });
+    await render({ open: true, existingChatAgentIds: ["first", "second"] });
+    await search("designer");
+    expect(options()[0].textContent).toContain("Open chat");
+    expect(options()[0].textContent).not.toContain("New chat");
+    await act(async () => options()[0].click());
+    expect(props.onSelect).toHaveBeenLastCalledWith(agents[1]);
+  });
+
   it("recovers from no results and resets search when reopened", async () => {
     await render();
     await search("accountant");
