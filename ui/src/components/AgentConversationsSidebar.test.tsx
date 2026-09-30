@@ -14,7 +14,7 @@ vi.mock("@/lib/router", () => ({
   useLocation: () => ({ pathname: "/A/chats/alice" }), useNavigate: () => state.navigate,
   Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => <a href={to} {...props}>{children}</a>,
 }));
-vi.mock("@/api/agents", () => ({ agentsApi: { list: vi.fn() } }));
+vi.mock("@/api/agents", () => ({ agentsApi: { list: vi.fn(), get: vi.fn() } }));
 vi.mock("@/api/agentChats", () => ({ agentChatsApi: { list: vi.fn(), ensure: state.ensure } }));
 vi.mock("@/api/auth", () => ({ authApi: { getSession: () => ({ user: { id: "user-a" } }) } }));
 vi.mock("./AgentAvatar", () => ({ AgentAvatar: () => null }));
@@ -22,7 +22,7 @@ let root: Root;
 let container: HTMLDivElement;
 let client: QueryClient;
 const roster = ["alice", "bob"].map(id => ({ id, companyId: "company-a", name: id, urlKey: id, role: "general", title: "Teammate", status: "idle" } as Agent));
-const chat = (id: string) => ({ id: `chat-${id}`, companyId: "company-a", conversationAgentId: id, conversationUserId: "user-a" });
+const chat = (id: string) => ({ id: `chat-${id}`, companyId: "company-a", conversationAgentId: id, conversationUserId: "user-a", updatedAt: id === "bob" ? "2026-09-02T00:00:00Z" : "2026-09-01T00:00:00Z" });
 async function render() {
   await act(async () => { root.render(<QueryClientProvider client={client}><AgentConversationsSidebar /></QueryClientProvider>); });
 }
@@ -72,4 +72,26 @@ it("keeps failures retryable in the picker and closes it on company changes", as
   await render();
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(container.textContent).not.toContain("alice");
+});
+
+it("preserves recent activity order when reopening an older conversation", async () => {
+  client.setQueryData(queryKeys.agentChats.list("company-a", "user-a"), [chat("bob"), chat("alice")]);
+  await render();
+  const links = () => [...container.querySelectorAll('nav[aria-label="Agent conversations"] a')].map(link => link.getAttribute("href"));
+  expect(links()).toEqual(["/chats/bob", "/chats/alice"]);
+  await addChat(); await choose("alice"); await render();
+  expect(links()).toEqual(["/chats/bob", "/chats/alice"]);
+});
+
+it("retains terminated agents' history by id without offering them for new chats", async () => {
+  const retired = { ...roster[0], id: "retired-id", name: "Retired", status: "terminated", urlKey: "alice" };
+  client.setQueryData(queryKeys.agents.detail(retired.id), retired);
+  client.setQueryData(queryKeys.agentChats.list("company-a", "user-a"), [chat(retired.id), chat("alice")]);
+  await render();
+  const historyLink = container.querySelector<HTMLAnchorElement>('a[href="/chats/retired-id"]')!;
+  expect(historyLink.textContent).toContain("RetiredTerminated");
+  await act(async () => historyLink.click());
+  expect(state.navigate).toHaveBeenLastCalledWith("/chats/retired-id");
+  await addChat();
+  expect([...document.querySelectorAll("[role=option]")].some(option => option.textContent?.includes("Retired"))).toBe(false);
 });

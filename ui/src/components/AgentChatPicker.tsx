@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Agent } from "@paperclipai/shared";
 import { AgentIcon } from "@/components/AgentIconPicker";
 import { Button } from "@/components/ui/button";
@@ -26,16 +26,15 @@ export function AgentChatPicker({ open, onOpenChange, ...props }: AgentChatPicke
           {props.existingChatAgentIds && <p className="mt-2 text-sm text-muted-foreground">One conversation per agent. Pick up where you left off.</p>}
         </div>
         {/* The dialog unmounts its content on close, so each search starts empty. */}
-        <AgentChatPickerResults {...props} onSelect={async (agent) => {
-          await props.onSelect(agent);
-          onOpenChange(false);
-        }} />
+        <AgentChatPickerResults key={String(open)} {...props} onComplete={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function AgentChatPickerResults({ agents, onSelect, loading, error, onRetry, existingChatAgentIds, renderAgentIcon }: Omit<AgentChatPickerProps, "open" | "onOpenChange">) {
+function AgentChatPickerResults({ agents, onSelect, onComplete, loading, error, onRetry, existingChatAgentIds, renderAgentIcon }: Omit<AgentChatPickerProps, "open" | "onOpenChange"> & { onComplete: () => void }) {
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [search, setSearch] = useState("");
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -45,6 +44,7 @@ function AgentChatPickerResults({ agents, onSelect, loading, error, onRetry, exi
     setSelectionError(null);
     try {
       await onSelect(agent);
+      if (mounted.current) onComplete();
     } catch (error) {
       setSelectionError(error instanceof Error ? error.message : "Couldn’t open chat. Try again.");
     } finally {

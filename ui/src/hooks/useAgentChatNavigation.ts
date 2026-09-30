@@ -44,7 +44,9 @@ export function useOpenAgentChat(companyId: string | null, userId: string | null
     const chat = await agentChatsApi.ensure(companyId, agent.id);
     client.setQueryData(queryKeys.agentChats.detail(companyId, userId, agent.id), chat);
     client.setQueryData(queryKeys.issues.detail(chat.id), chat);
-    client.setQueryData<Issue[]>(queryKeys.agentChats.list(companyId, userId), previous => [chat, ...(previous ?? []).filter(item => item.id !== chat.id)]);
+    client.setQueryData<Issue[]>(queryKeys.agentChats.list(companyId, userId), previous =>
+      [chat, ...(previous ?? []).filter(item => item.id !== chat.id)]
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || b.id.localeCompare(a.id)));
     if (!current.mounted || scope.current !== current) return;
     navigate(`/chats/${encodeURIComponent(agentRouteRef(agent))}`);
     if (isMobile) setSidebarOpen(false);

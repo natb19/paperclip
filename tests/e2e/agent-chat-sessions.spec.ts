@@ -273,7 +273,7 @@ test("secondary chat navigation preserves layout, unique conversations, history,
     await compose.click();
     await expect(picker.getByRole("option")).toHaveCount(6);
     await picker.getByRole("combobox").fill("Beta");
-    await expect(picker.getByRole("option")).toContainText("New chat");
+    await expect(picker.getByRole("option", { name: /^Beta / })).toContainText("New chat");
     await picker.getByRole("combobox").press("Enter");
     await expect(picker).not.toBeVisible();
     await expect(page.getByRole("link", { name: "Configure Beta", exact: true })).toBeVisible();
@@ -287,7 +287,7 @@ test("secondary chat navigation preserves layout, unique conversations, history,
     await compose.click();
     await expect(picker.getByRole("combobox")).toHaveValue("");
     await picker.getByRole("combobox").fill("Beta");
-    await expect(picker.getByRole("option")).toContainText("Open chat");
+    await expect(picker.getByRole("option", { name: /^Beta / })).toContainText("Open chat");
     await picker.getByRole("combobox").press("Enter");
     await expect(picker).not.toBeVisible();
     expect((await json(await request.get(betaPath))).id).toBe(beta.id);
@@ -343,6 +343,14 @@ test("secondary chat navigation preserves layout, unique conversations, history,
     await expect(page.getByText("Background activity", { exact: true })).toBeVisible();
     expect((await json(await request.get(betaPath))).id).toBe(beta.id);
     expect(await json(await request.get(chatListPath))).toHaveLength(2);
+    await json(await request.post(`/api/agents/${f.agents[1].id}/terminate`));
+    await page.goto(`/${f.company.issuePrefix}/chats`);
+    await expect(betaLink).toContainText("Terminated");
+    await betaLink.click();
+    await expect(page).toHaveURL(new RegExp(`/chats/${f.agents[1].id}$`));
+    await expect(page.getByText("Background activity", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByText("Background activity", { exact: true })).toBeVisible();
   } finally {
     await f.restore();
     await json(await request.patch("/api/instance/settings/experimental", {

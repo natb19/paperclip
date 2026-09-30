@@ -62,7 +62,7 @@ export function AgentConversationSidebar({ agents, availableAgents = agents, act
           <div className="flex flex-1 flex-col gap-2"><div className="h-3 w-2/3 rounded-sm bg-muted" /><div className="h-2 w-full rounded-sm bg-muted" /></div>
         </div>)}
       </div> : visible.length ? <nav aria-label="Agent conversations" className="flex flex-col gap-1">
-        {visible.map(agent => <Link key={agent.id} to={`/chats/${encodeURIComponent(agentRouteRef(agent))}`}
+        {visible.map(agent => <Link key={agent.id} to={`/chats/${encodeURIComponent(agent.status === "terminated" ? agent.id : agentRouteRef(agent))}`}
           aria-current={activeId === agent.id ? "page" : undefined}
           title={`${agent.name}${agent.title ? ` · ${agent.title}` : ""}`}
           onClick={event => { if (onSelect) { event.preventDefault(); onSelect(agent); } }}
@@ -70,7 +70,7 @@ export function AgentConversationSidebar({ agents, availableAgents = agents, act
           <AgentAvatar agent={agent} size={32} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="truncate text-sm font-medium">{agent.name}</span>
-            <span className="truncate text-xs text-muted-foreground">{agent.status === "paused" ? "Paused" : previews[agent.id] ?? agent.title ?? "Start a conversation"}</span>
+            <span className="truncate text-xs text-muted-foreground">{agent.status === "terminated" ? "Terminated" : agent.status === "paused" ? "Paused" : previews[agent.id] ?? agent.title ?? "Start a conversation"}</span>
           </span>
         </Link>)}
       </nav> : <div className="flex flex-col items-start gap-2 px-2 py-6">
