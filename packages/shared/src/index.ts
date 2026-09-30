@@ -2512,7 +2512,7 @@ export {
 } from "./validators/index.js";
 
 export { API_PREFIX, API } from "./api.js";
-export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike } from "./agent-url-key.js";
+export { normalizeAgentUrlKey, deriveAgentUrlKey, isUuidLike, isUuidShaped } from "./agent-url-key.js";
 export { deriveProjectUrlKey, normalizeProjectUrlKey, hasNonAsciiContent } from "./project-url-key.js";
 export {
   AGENT_MENTION_SCHEME,
