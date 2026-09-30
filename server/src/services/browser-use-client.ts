@@ -20,7 +20,7 @@ export function isBrowserUseConnection(c: {
   config?: Record<string, unknown>;
 }) {
   return (
-    c.transport === "rest_api" && c.config?.sourceTemplateKey === "browser-use"
+    c.transport === "rest_api" && c.config?.sourceTemplateKey === "browser-use-cloud"
   );
 }
 export function browserUseViewerUrl(value: unknown): string {

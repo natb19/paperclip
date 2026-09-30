@@ -2362,7 +2362,7 @@ export function classifyRisk(
     if (annotations.readOnlyHint === false || annotations.writeHint === true) return "write";
     return reviewedReads.has(tool.name) ? "read" : "write";
   }
-  if (sourceTemplateKey === "browser-use") {
+  if (sourceTemplateKey === "browser-use-cloud") {
     return BROWSER_USE_TOOLS.find(t => t.name === tool.name)?.annotations.readOnlyHint ? "read" : "destructive";
   }
   if (sourceTemplateKey === "railway") {
@@ -12722,7 +12722,7 @@ export function toolAccessService(
                 applicationKey: `app-gallery:${galleryEntry?.slug ?? "link"}:${randomUUID()}`,
                 name: applicationName,
                 description: safeApplicationDescription,
-                type: transport === "rest_api" && galleryEntry?.slug === "browser-use" ? "rest_api" : transport === "mcp_remote" ? "mcp_http" : "mcp_stdio",
+                type: transport === "rest_api" && galleryEntry?.slug === "browser-use-cloud" ? "rest_api" : transport === "mcp_remote" ? "mcp_http" : "mcp_stdio",
                 status: "draft",
                 metadata: galleryEntry
                   ? {

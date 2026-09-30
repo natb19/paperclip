@@ -1,1 +1,0 @@
-ALTER TABLE "browser_use_runs" ADD COLUMN IF NOT EXISTS "recovery_cursor" text;

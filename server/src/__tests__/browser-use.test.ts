@@ -6,9 +6,17 @@ import {
   browserUseCostCap,
   browserUseViewerUrl,
   sanitizeBrowserUse,
+  isBrowserUseConnection,
 } from "../services/browser-use-client.js";
 
 describe("Browser Use v4 transport", () => {
+  it("recognizes only the Cloud connector identity", () => {
+    expect(isBrowserUseConnection({ transport: "rest_api", config: { sourceTemplateKey: "browser-use-cloud" } })).toBe(true);
+    for (const sourceTemplateKey of ["browser-use", "browser-use-native", "another-browser"]) {
+      expect(isBrowserUseConnection({ transport: "rest_api", config: { sourceTemplateKey } })).toBe(false);
+    }
+    expect(isBrowserUseConnection({ transport: "mcp_remote", config: { sourceTemplateKey: "browser-use-cloud" } })).toBe(false);
+  });
   it("sends v4 REST with the API key header, never MCP, and never retries paid creates", async () => {
     const request = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe("https://api.browser-use.com/api/v4/runs");

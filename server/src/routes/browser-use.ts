@@ -115,7 +115,7 @@ export function browserUseRoutes(db: Db, service = browserUseService(db)) {
     },
   );
   router.get(
-    "/companies/:companyId/browser-use/grants/:grantId/profiles",
+    "/companies/:companyId/browser-use-cloud/grants/:grantId/profiles",
     async (req, res) => {
       assertBoard(req);
       assertCompanyAccess(req, req.params.companyId);
@@ -130,7 +130,7 @@ export function browserUseRoutes(db: Db, service = browserUseService(db)) {
     },
   );
   router.get(
-    "/companies/:companyId/browser-use/grants/:grantId/settings",
+    "/companies/:companyId/browser-use-cloud/grants/:grantId/settings",
     async (req, res) => {
       assertBoard(req);
       assertCompanyAccess(req, req.params.companyId);
@@ -145,7 +145,7 @@ export function browserUseRoutes(db: Db, service = browserUseService(db)) {
     },
   );
   router.put(
-    "/companies/:companyId/browser-use/grants/:grantId/settings",
+    "/companies/:companyId/browser-use-cloud/grants/:grantId/settings",
     async (req, res) => {
       assertBoard(req);
       assertCompanyAccess(req, req.params.companyId);

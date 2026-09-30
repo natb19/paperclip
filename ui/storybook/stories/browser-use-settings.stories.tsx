@@ -8,7 +8,7 @@ import type {
 import { BrowserUseSettingsPanel } from "@/pages/apps/app-detail/BrowserUseSettingsPanel";
 import { BrowserStoryProviders, mockBrowserUse } from "../fixtures/browser-use";
 const connection = {
-  id: "browser-use-connection",
+  id: "browser-use-cloud-connection",
   companyId: "storybook-company",
 } as ToolConnection;
 const grant = (id: string, kind: "organization" | "user"): ConnectionGrant =>
@@ -27,7 +27,7 @@ const grants = {
   grants: [grant("shared", "organization")],
 } as ConnectionGrantsResponse;
 const meta = {
-  title: "Connections/Browser Use/Settings",
+  title: "Connections/Browser Use Cloud/Settings",
   component: BrowserUseSettingsPanel,
   parameters: {
     layout: "centered",

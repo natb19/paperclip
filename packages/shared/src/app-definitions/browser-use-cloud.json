@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "slug": "browser-use",
-  "name": "Browser Use",
+  "slug": "browser-use-cloud",
+  "name": "Browser Use Cloud",
   "description": "Delegate browser tasks and watch them live in Paperclip.",
   "categories": [
     "productivity"

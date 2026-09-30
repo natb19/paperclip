@@ -517,8 +517,8 @@
       "localAsset": "/brands/apps/zep.png"
     },
     {
-      "slug": "browser-use",
-      "provider": "Browser Use",
+      "slug": "browser-use-cloud",
+      "provider": "Browser Use Cloud",
       "catalogVisible": true,
       "localAsset": "/brands/apps/browser-use.svg",
       "sourceUrl": "https://browser-use.com/logo-primary.svg",

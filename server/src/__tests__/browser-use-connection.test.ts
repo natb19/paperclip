@@ -21,6 +21,7 @@ import {
   heartbeatRuns,
   issues,
   toolConnections,
+  toolApplications,
   toolConnectionInstalls,
   toolProfiles,
   toolProfileBindings,
@@ -34,6 +35,11 @@ import { toolAccessService } from "../services/tool-access.js";
 import { createToolGatewayService } from "../services/tool-gateway.js";
 import { browserUseViewports } from "../services/browser-use-viewport.js";
 import { browserUseService } from "../services/browser-use.js";
+import { applyConnectorSkills, prepareConnectorSkillDelivery, resolveConnectorAssignments } from "../services/connector-runtime.js";
+import { registerAssignedMcpGateway } from "../services/native-runtime/assigned-mcp-tools.js";
+import { listPaperclipSkillEntries } from "@paperclipai/adapter-utils/server-utils";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -184,7 +190,7 @@ const actor = { actorType: "user" as const, actorId: "browser-reviewer" };
       const connection = await access.connectGalleryApp(
         company.id,
         {
-          galleryKey: "browser-use",
+          galleryKey: "browser-use-cloud",
           ...(personal ? { grantKind: "user" as const } : {}),
           connectionMethodKey: "cloud-v4",
           credentialValues: { "credentials.apiKey": "bu_fixture_secret" },
@@ -253,6 +259,7 @@ const actor = { actorType: "user" as const, actorId: "browser-reviewer" };
         remoteHttpRequest: request,
         toolActionSigningSecret: "browser-fixture-signing-secret",
       });
+      registerAssignedMcpGateway(db, gateway);
       const gatewaySession = await gateway.createSession({
         companyId: company.id,
         agentId: agent.id,
@@ -306,17 +313,86 @@ const actor = { actorType: "user" as const, actorId: "browser-reviewer" };
         },
       };
     }
+    it("keeps Cloud instructions out of universal skills and unassigned runtime overlays", async () => {
+      const skills = await listPaperclipSkillEntries(fileURLToPath(new URL("../", import.meta.url)), [fileURLToPath(new URL("../../../skills", import.meta.url))]);
+      expect(skills.some(skill => skill.runtimeName === "paperclip")).toBe(true);
+      expect(skills.some(skill => ["browser-use", "browser-use-cloud"].includes(skill.runtimeName))).toBe(false);
+      const base = { paperclipSkillSync: { desiredSkills: ["paperclipai/paperclip/browser-use", "paperclipai/paperclip/browser-use-cloud"] } };
+      const unassigned = await applyConnectorSkills(base, [
+        { key: "paperclipai/paperclip/browser-use", runtimeName: "browser-use", source: "/retired-browser-skill" },
+        { key: "paperclipai/paperclip/browser-use-cloud", runtimeName: "browser-use-cloud", source: "/unassigned-cloud-skill" },
+        { key: "custom/browser-use", runtimeName: "browser-use", source: "/another-browser-skill" },
+      ], []);
+      expect(unassigned.paperclipRuntimeSkills).toEqual([{ key: "custom/browser-use", runtimeName: "browser-use", source: "/another-browser-skill" }]);
+      expect(unassigned.paperclipConnectorSkillDigest).toBeNull();
+      expect(base.paperclipSkillSync.desiredSkills).toHaveLength(2);
+    });
+    it("delivers the Cloud skill only with authorized connection tools in a task run", async () => {
+      const f = await fixture();
+      const [unassignedAgent] = await db.insert(agents).values({
+        companyId: f.company.id,
+        name: "Agent without the Cloud connection",
+        role: "engineer",
+        adapterType: "process",
+        adapterConfig: {},
+      }).returning();
+      expect(await f.gateway.browserUseResources({ companyId: f.company.id, agentId: f.agent.id })).toEqual([]);
+      expect(await resolveConnectorAssignments(db, { ...f.binding, agentId: unassignedAgent.id })).toEqual([]);
+      expect(await resolveConnectorAssignments(db, { ...f.binding, companyId: randomUUID() })).toEqual([]);
+      const assignments = await resolveConnectorAssignments(db, f.binding);
+      expect(assignments).toMatchObject([{ key: "browser-use-cloud", skillKey: "paperclipai/paperclip/browser-use-cloud", resources: [{ connectionId: f.connection.connectionId }] }]);
+      const config = await applyConnectorSkills({}, [], assignments);
+      const skill = config.paperclipRuntimeSkills[0];
+      expect(skill.runtimeName).toBe("browser-use-cloud");
+      const markdown = await readFile(path.join(skill.source, "SKILL.md"), "utf8");
+      expect(markdown).toContain("name: browser-use-cloud");
+      expect(markdown).toContain("browser_start");
+      expect(markdown).toContain(f.connection.connectionId);
+      expect(markdown).not.toContain("bu_fixture_secret");
+      for (const adapterType of ["paperclip_runner", "codex_local", "claude_local", "kimi_local"]) {
+        const delivery = await prepareConnectorSkillDelivery({ ...config, engine: "cli" }, adapterType);
+        expect(delivery.config.paperclipRuntimeSkills).toEqual([skill]);
+      }
+      const sharedHome = await prepareConnectorSkillDelivery(config, "cursor_local");
+      expect(sharedHome.config.paperclipRuntimeSkills).toEqual([]);
+      expect(sharedHome.instructions).toContain("name: browser-use-cloud");
+      expect(sharedHome.config.paperclipConnectorSkillDigest).toBe(config.paperclipConnectorSkillDigest);
+      await db.update(connectionGrants).set({ status: "revoked" }).where(eq(connectionGrants.id, f.grant.id));
+      expect(await resolveConnectorAssignments(db, f.binding)).toEqual([]);
+      const revoked = await applyConnectorSkills(config, config.paperclipRuntimeSkills, []);
+      expect(revoked.paperclipRuntimeSkills).toEqual([]);
+      expect(revoked.paperclipConnectorSkillDigest).toBeNull();
+      expect((await prepareConnectorSkillDelivery(revoked, "cursor_local")).instructions).toBe("");
+    });
+    it("withholds Cloud instructions when connection tools are disabled", async () => {
+      const f = await fixture();
+      await db.update(toolConnections).set({ enabled: false }).where(eq(toolConnections.id, f.connection.connectionId));
+      expect(await resolveConnectorAssignments(db, f.binding)).toEqual([]);
+    });
     it("reapplies the renumbered migration without losing existing browser work", async () => {
       const f = await fixture();
       await f.service.execute(f.binding, f.grant, randomUUID(), "browser_start", {
         task: "Read example.com",
         maxCostUsd: 0.5,
       });
+      f.ready(); f.complete(); await f.tick();
       const previous = await db.select().from(browserUseRuns)
         .where(eq(browserUseRuns.companyId, f.company.id));
       expect(previous).toHaveLength(1);
+      const [original] = await db.select().from(toolConnections).where(eq(toolConnections.id, f.connection.connectionId));
+      await db.update(toolConnections).set({
+        config: { ...original.config, sourceTemplateKey: "browser-use" },
+        transportConfig: { ...original.transportConfig, sourceTemplateKey: "browser-use" },
+      }).where(eq(toolConnections.id, original.id));
+      await db.update(toolApplications).set({
+        applicationKey: `app-gallery:browser-use:${original.id}`,
+        metadata: { sourceTemplateKey: "browser-use", galleryKey: "browser-use" },
+      }).where(eq(toolApplications.id, original.applicationId));
+      const legacyCost = { provider: "browser-use", biller: "browser-use", billingCode: `browser-use:${previous[0].id}` };
+      await db.update(costEvents).set(legacyCost).where(eq(costEvents.companyId, f.company.id));
+      await db.update(financeEvents).set(legacyCost).where(eq(financeEvents.companyId, f.company.id));
       const migration = await readFile(new URL(
-        "../../../packages/db/src/migrations/0289_daffy_pandemic.sql", import.meta.url,
+        "../../../packages/db/src/migrations/0290_browser_use_cloud.sql", import.meta.url,
       ), "utf8");
       for (let attempt = 0; attempt < 2; attempt++) {
         for (const statement of migration.split("--> statement-breakpoint")) {
@@ -325,6 +401,13 @@ const actor = { actorType: "user" as const, actorId: "browser-reviewer" };
       }
       expect(await db.select().from(browserUseRuns)
         .where(eq(browserUseRuns.companyId, f.company.id))).toEqual(previous);
+      const [migrated] = await db.select().from(toolConnections).where(eq(toolConnections.id, original.id));
+      expect(migrated).toMatchObject({ config: { sourceTemplateKey: "browser-use-cloud" }, transportConfig: { sourceTemplateKey: "browser-use-cloud" }, credentialSecretRefs: original.credentialSecretRefs });
+      expect(await db.select().from(toolApplications).where(eq(toolApplications.id, original.applicationId))).toMatchObject([{ applicationKey: `app-gallery:browser-use-cloud:${original.id}`, metadata: { sourceTemplateKey: "browser-use-cloud", galleryKey: "browser-use-cloud" } }]);
+      expect(await resolveConnectorAssignments(db, f.binding)).toMatchObject([{ key: "browser-use-cloud" }]);
+      await f.tick();
+      expect(await db.select().from(costEvents).where(eq(costEvents.companyId, f.company.id))).toMatchObject([{ provider: "browser-use-cloud", biller: "browser-use-cloud", billingCode: `browser-use-cloud:${previous[0].id}`, costCents: 15 }]);
+      expect(await db.select().from(financeEvents).where(eq(financeEvents.companyId, f.company.id))).toMatchObject([{ provider: "browser-use-cloud", amountCents: 15 }]);
     });
     it("delivers Browser Use through the pinned native and CLI runtime gateway", async () => {
       const f = await fixture();
@@ -474,7 +557,7 @@ const actor = { actorType: "user" as const, actorId: "browser-reviewer" };
         agentId: f.agent.id,
         costEventId: cost.id,
         amountCents: 15,
-        biller: "browser-use",
+        biller: "browser-use-cloud",
         direction: "debit",
         currency: "USD",
       });

@@ -4,6 +4,12 @@ Approved implementation: connect Browser Use Cloud using its v4 REST API and the
 normal Access → Connect → Permissions flow. API keys remain in the vault; actions
 use the existing governed gateway. Hosted browser tasks are destructive-capable.
 
+2026-09-30 clarification: the app key and runtime skill name are
+`browser-use-cloud`. Bundle instructions with the connector implementation,
+outside universal `skills/`, and contribute them only with authorized connection
+tools in the agent's task run. Remove them when access is revoked. Preserve
+pre-release connection and cost records when migrating the old provider key.
+
 Persist company/task/agent/credential-grant ownership, conversation sessions,
 individual runs with durable event cursors and accounting checkpoints, and browser
 instances separately. Observe browser.ready while work proceeds. Reconcile after

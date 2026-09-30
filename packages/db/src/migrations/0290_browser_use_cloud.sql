@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS "browser_use_runs" (
 	"provider_run_id" uuid,
 	"status" text DEFAULT 'creating' NOT NULL,
 	"detached_until" timestamp with time zone,
+	"recovery_cursor" text,
 	"event_cursor" integer DEFAULT 0 NOT NULL,
 	"events_drained" integer DEFAULT 0 NOT NULL,
 	"accounted_cents" integer DEFAULT 0 NOT NULL,
@@ -121,3 +122,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS "browser_use_sessions_provider_uq" ON "browser
 --> statement-breakpoint
 -- Support development databases that applied the initial browser schema.
 ALTER TABLE "browser_use_runs" ADD COLUMN IF NOT EXISTS "detached_until" timestamp with time zone;
+
+--> statement-breakpoint
+ALTER TABLE "browser_use_runs" ADD COLUMN IF NOT EXISTS "recovery_cursor" text;
+--> statement-breakpoint
+-- Preserve pre-release connections, grants and browser history under the Cloud identity.
+UPDATE "tool_connections"
+SET "config" = jsonb_set("config", '{sourceTemplateKey}', '"browser-use-cloud"'),
+    "transport_config" = CASE WHEN "transport_config"->>'sourceTemplateKey' = 'browser-use'
+      THEN jsonb_set("transport_config", '{sourceTemplateKey}', '"browser-use-cloud"') ELSE "transport_config" END
+WHERE "transport" = 'rest_api' AND "config"->>'sourceTemplateKey' = 'browser-use';
+--> statement-breakpoint
+UPDATE "tool_applications"
+SET "metadata" = "metadata" || '{"sourceTemplateKey":"browser-use-cloud","galleryKey":"browser-use-cloud"}'::jsonb,
+    "application_key" = regexp_replace("application_key", '^app-gallery:browser-use:', 'app-gallery:browser-use-cloud:')
+WHERE "type" = 'rest_api' AND "metadata"->>'sourceTemplateKey' = 'browser-use';
+--> statement-breakpoint
+UPDATE "cost_events"
+SET "provider" = 'browser-use-cloud',
+    "biller" = CASE WHEN "biller" = 'browser-use' THEN 'browser-use-cloud' ELSE "biller" END,
+    "billing_code" = regexp_replace("billing_code", '^browser-use:', 'browser-use-cloud:')
+WHERE "provider" = 'browser-use' AND "billing_code" IN (
+  SELECT 'browser-use:' || "id"::text FROM "browser_use_runs" WHERE "company_id" = "cost_events"."company_id"
+);
+--> statement-breakpoint
+UPDATE "finance_events"
+SET "provider" = 'browser-use-cloud',
+    "biller" = CASE WHEN "biller" = 'browser-use' THEN 'browser-use-cloud' ELSE "biller" END,
+    "billing_code" = regexp_replace("billing_code", '^browser-use:', 'browser-use-cloud:')
+WHERE "provider" = 'browser-use' AND "billing_code" IN (
+  SELECT 'browser-use:' || "id"::text FROM "browser_use_runs" WHERE "company_id" = "finance_events"."company_id"
+);

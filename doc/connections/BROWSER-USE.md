@@ -7,7 +7,7 @@ agent, local browser tools, or the board UI.
 
 ## Connect and configure
 
-Choose **Browser Use** in Apps, select agent access, enter a project API key from
+Choose **Browser Use Cloud** (`browser-use-cloud`) in Apps, select agent access, enter a project API key from
 [Browser Use settings](https://cloud.browser-use.com/settings), and review
 Permissions. No OAuth registration, callback, Paperclip ID, or external connection
 broker is required. Cloud and self-hosted instances use the same server-side path.
@@ -48,7 +48,21 @@ hosted test, use a real task so ownership, budgets and cleanup are exercised.
 ## Runtime and lifecycle
 
 The gateway exposes reviewed REST tools to existing native and CLI tool bridges.
-Assigned access contributes `skills/browser-use/SKILL.md`. The parent agent starts
+Authorized task/run access contributes the `browser-use-cloud` skill, bundled
+with the connector in `server/src/services/connectors/browser-use-cloud/skill.ts`.
+It is not in the universal `skills/` directory and is not offered to every agent.
+The existing connector assignment resolver requires accessible connection tools
+and a current credential grant. No assignment, disabled tools/connections, or
+revoked access means no skill. The run-scoped bundle exposes its short description
+for discovery and contains the detailed `SKILL.md` for using this connection.
+Adapters that cannot isolate skill files receive the same authorized instructions
+in their run context. Nothing is added to an agent's saved skill preferences.
+Retired `paperclipai/paperclip/browser-use` selections are stripped from runtime
+overlays; unrelated browser skills keep their own names and behavior.
+The idempotent migration updates pre-release app/connection and financial keys
+to `browser-use-cloud` without replacing credentials, grants, or browser records.
+
+The parent agent starts
 a hosted run, polls its status and stays alive until it finishes. Approved starts
 can execute after the requesting turn ends: a ten-minute handoff window lets the
 resumed agent attach by reading status. An expired handoff stops unfinished work.

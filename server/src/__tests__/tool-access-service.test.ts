@@ -5069,7 +5069,7 @@ describeEmbeddedPostgres("tool access service", () => {
     });
     expect(res.body.apps.map((app: { slug: string }) => app.slug)).toEqual(
       expect.arrayContaining([
-        "browser-use",
+        "browser-use-cloud",
         "agentmail",
         "imessage-photon",
         "jira",

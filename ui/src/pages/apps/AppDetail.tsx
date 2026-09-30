@@ -615,7 +615,7 @@ export function AppDetail({ renderActions, onReconnect }: {
           : permissionsLoading
           ? <ToolsLoading />
           : <div className="space-y-10">
-              {connection.config?.sourceTemplateKey === "browser-use" && <BrowserUseSettingsPanel connection={connection} grants={grantsQuery.data} />}
+              {connection.config?.sourceTemplateKey === "browser-use-cloud" && <BrowserUseSettingsPanel connection={connection} grants={grantsQuery.data} />}
               {connection.config?.sourceTemplateKey === "railway" && <RailwayAccessPanel connection={connection} grants={grantsQuery.data} />}
               {connection.config?.provider === "agentmail" && <EmailConnectionInboxes companyId={connection.companyId} connectionId={connection.id} canConfigure={grantsQuery.data?.capabilities?.canConfigure ?? false} />}
               {connection.config?.provider === "agentmail" ? <EmailConnectionAccess companyId={connection.companyId} connectionId={connection.id} agents={agents} /> : <>

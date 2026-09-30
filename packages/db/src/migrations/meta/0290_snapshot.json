@@ -1,6 +1,6 @@
 {
-  "id": "96e79ed8-0be5-470d-8f74-f9f477a1467a",
-  "prevId": "5e53a793-35b1-4341-ad43-f87d42f45b9f",
+  "id": "26315a87-4675-4dea-9634-efe5e878cc7d",
+  "prevId": "3960ae6b-5bf1-4fd7-91db-6a18fc7eaa19",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3796,13 +3796,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "keyboard_shortcuts": {
-          "name": "keyboard_shortcuts",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

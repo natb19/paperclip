@@ -1327,9 +1327,9 @@ const browserUseOperations = [
   ["post", "/api/issues/{issueId}/browsers/{browserId}/control", "Control a task browser", browserUseControlSchema],
   ["post", "/api/issues/{issueId}/browsers/{browserId}/viewport", "Set the browser viewport", browserUseViewportSchema],
   ["post", "/api/issues/{issueId}/browsers/{browserId}/viewport/release", "Release viewport ownership", browserUseViewerSchema],
-  ["get", "/api/companies/{companyId}/browser-use/grants/{grantId}/profiles", "List available browser profiles", undefined],
-  ["get", "/api/companies/{companyId}/browser-use/grants/{grantId}/settings", "Read browser credential settings", undefined],
-  ["put", "/api/companies/{companyId}/browser-use/grants/{grantId}/settings", "Update browser credential settings", browserUseSettingsSchema],
+  ["get", "/api/companies/{companyId}/browser-use-cloud/grants/{grantId}/profiles", "List available browser profiles", undefined],
+  ["get", "/api/companies/{companyId}/browser-use-cloud/grants/{grantId}/settings", "Read browser credential settings", undefined],
+  ["put", "/api/companies/{companyId}/browser-use-cloud/grants/{grantId}/settings", "Update browser credential settings", browserUseSettingsSchema],
 ] as const;
 
 const BOARD_ONLY_OPERATIONS = new Set([
@@ -2114,7 +2114,7 @@ registry.registerPath({
 
 for (const [method, path, summary, body] of browserUseOperations) {
   registerCurrentRoute({
-    method, path, summary, body, tags: ["Browser Use"],
+    method, path, summary, body, tags: ["Browser Use Cloud"],
     ...(path.endsWith("/viewer") ? { query: browserUseViewerSchema.partial() } : {}),
     responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden, 404: r.notFound, 409: r.conflict },
   });

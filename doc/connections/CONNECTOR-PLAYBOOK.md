@@ -497,6 +497,13 @@ registry in `server/src/services/connector-runtime.ts`; AgentMail is the first
 consumer. This registry describes bundled server implementations, not executable
 code or skill URLs supplied by a credential or external message.
 
+Optional connector instructions must not be placed in the universal `skills/`
+directory, which adapters can enumerate for every agent. A trusted contribution
+can provide `skillMarkdown` from its connector module; the server then materializes
+`SKILL.md` only for authorized assignments. Browser Use Cloud uses this path with
+the app key and skill name `browser-use-cloud`, leaving generic browser skill
+names available to other integrations.
+
 For each contribution, declare its connector key, bundled skill, namespaced tool
 definitions, resource-assignment resolver, and execution handler. Use names such
 as `agentmail_send` rather than extending core tools with provider-specific

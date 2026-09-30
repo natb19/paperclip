@@ -20,7 +20,7 @@ import a18 from "./app-definitions/api-key-generic.json" with { type: "json" };
 import a19 from "./app-definitions/sentry.json" with { type: "json" };
 import a20 from "./app-definitions/vercel.json" with { type: "json" };
 import a21 from "./app-definitions/anthropic.json" with { type: "json" };
-import a22 from "./app-definitions/browser-use.json" with { type: "json" };
+import a22 from "./app-definitions/browser-use-cloud.json" with { type: "json" };
 import a23 from "./app-definitions/cognee.json" with { type: "json" };
 import a24 from "./app-definitions/jira.json" with { type: "json" };
 import a25 from "./app-definitions/airtable.json" with { type: "json" };

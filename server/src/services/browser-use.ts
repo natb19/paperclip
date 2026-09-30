@@ -146,7 +146,7 @@ export function browserUseService(
           configPath: ref.configPath,
           responsibleUserId: row.grant.subjectUserId,
           actorType: "system",
-          actorId: cleanup ? "browser-use-cleanup" : "browser-use",
+          actorId: cleanup ? "browser-use-cloud-cleanup" : "browser-use-cloud",
         },
       },
     );
@@ -278,7 +278,7 @@ export function browserUseService(
   async function signal(
     s: Session,
     action: string,
-    actorId = "browser-use",
+    actorId = "browser-use-cloud",
     actorType: "system" | "user" = "system",
   ) {
     await logActivity(db, {
@@ -930,13 +930,13 @@ export function browserUseService(
           issueId: s.issueId,
           projectId: issue?.projectId,
           heartbeatRunId: run.heartbeatRunId,
-          provider: "browser-use",
-          biller: "browser-use",
+          provider: "browser-use-cloud",
+          biller: "browser-use-cloud",
           billingType: "metered_api",
           model: summary.model,
           costCents: cents - current.accountedCents,
           occurredAt: new Date(),
-          billingCode: `browser-use:${run.id}`,
+          billingCode: `browser-use-cloud:${run.id}`,
         })
         .returning();
       await tx.insert(financeEvents).values({
@@ -949,8 +949,8 @@ export function browserUseService(
         billingCode: e.billingCode,
         eventKind: "inference_charge",
         direction: "debit",
-        biller: "browser-use",
-        provider: "browser-use",
+        biller: "browser-use-cloud",
+        provider: "browser-use-cloud",
         model: e.model,
         amountCents: e.costCents,
         currency: "USD",
@@ -991,7 +991,7 @@ export function browserUseService(
           .where(
             and(
               eq(costEvents.companyId, s.companyId),
-              eq(costEvents.billingCode, `browser-use:${run.id}`),
+              eq(costEvents.billingCode, `browser-use-cloud:${run.id}`),
             ),
           )
           .orderBy(desc(costEvents.createdAt))

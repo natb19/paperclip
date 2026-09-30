@@ -48,12 +48,12 @@ export const browserUseApi = {
     }),
   profiles: (companyId: string, grantId: string) =>
     api.get<Array<{ id: string; name: string | null }>>(
-      `/companies/${companyId}/browser-use/grants/${grantId}/profiles`,
+      `/companies/${companyId}/browser-use-cloud/grants/${grantId}/profiles`,
       { cache: "no-store" },
     ),
   settings: (companyId: string, grantId: string) =>
     api.get<BrowserUseSettings>(
-      `/companies/${companyId}/browser-use/grants/${grantId}/settings`,
+      `/companies/${companyId}/browser-use-cloud/grants/${grantId}/settings`,
     ),
   saveSettings: (
     companyId: string,
@@ -61,7 +61,7 @@ export const browserUseApi = {
     value: BrowserUseSettings,
   ) =>
     api.put<BrowserUseSettings>(
-      `/companies/${companyId}/browser-use/grants/${grantId}/settings`,
+      `/companies/${companyId}/browser-use-cloud/grants/${grantId}/settings`,
       value,
     ),
 };

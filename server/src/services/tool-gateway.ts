@@ -8941,7 +8941,7 @@ export function createToolGatewayService(
       for (const connectionId of new Set(tools.map(t => t.connectionId!))) {
         const [connection] = await db.select().from(toolConnections).where(and(eq(toolConnections.companyId, binding.companyId), eq(toolConnections.id, connectionId)));
         if (!connection || !isBrowserUseConnection(connection)) continue;
-        try { await resolveConnectionGrant(session, connection, false); resources.push({ id: connectionId, connectionId, label: "Browser Use" }); } catch { /* Unavailable grants do not contribute a runtime skill. */ }
+        try { await resolveConnectionGrant(session, connection, false); resources.push({ id: connectionId, connectionId, label: "Browser Use Cloud" }); } catch { /* Unavailable grants do not contribute a runtime skill. */ }
       }
       return resources;
     },

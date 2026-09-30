@@ -19,11 +19,11 @@ function CredentialSettings({
 }) {
   const id = useId();
   const saved = useQuery({
-    queryKey: ["browser-use-settings", grantId],
+    queryKey: ["browser-use-cloud-settings", grantId],
     queryFn: () => browserUseApi.settings(companyId, grantId),
   });
   const profiles = useQuery({
-    queryKey: ["browser-use-profiles", grantId],
+    queryKey: ["browser-use-cloud-profiles", grantId],
     queryFn: () => browserUseApi.profiles(companyId, grantId),
     retry: false,
   });
@@ -76,7 +76,7 @@ function CredentialSettings({
             rel="noreferrer"
             className="underline"
           >
-            Browser Use
+            Browser Use Cloud
           </a>
           .
         </p>

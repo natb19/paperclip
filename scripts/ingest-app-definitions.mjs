@@ -818,7 +818,7 @@ const apps = [
       },
     ),
   ],
-  ["browser-use", "Browser Use", "Delegate browser tasks and watch them live in Paperclip.", "productivity", "browser-use.com", ["https://cloud.browser-use.com/*"],
+  ["browser-use-cloud", "Browser Use Cloud", "Delegate browser tasks and watch them live in Paperclip.", "productivity", "browser-use.com", ["https://cloud.browser-use.com/*"],
     method("cloud-v4", "rest_api", "api_key", { serverUrl: "https://api.browser-use.com/api/v4" }, "S3",
       "Create an API key in [Browser Use settings](https://cloud.browser-use.com/settings) and paste it below. Your agents can browse websites while you watch and interact from the task's Browser tab.", {
         label: "Browser Use Cloud",
