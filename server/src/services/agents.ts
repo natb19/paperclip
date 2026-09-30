@@ -23,6 +23,7 @@ import {
   agentRuntimeConfigSchema,
   getAgentWorkEligibility,
   isUuidLike,
+  isUuidShaped,
   normalizeAgentApiKeyScope,
   normalizeAgentUrlKey,
   type AgentEligibilityAgent,
@@ -1373,7 +1374,11 @@ export function agentService(db: Db) {
         return { agent: null, ambiguous: false } as const;
       }
 
-      if (isUuidLike(raw)) {
+      // Any textual UUID is an id, not a shortname: a nil/v6/v7 or non-RFC
+      // variant id is still a storable primary key, and falling through to
+      // shortname matching made those rows unresolvable and reported them as
+      // "Agent not found".
+      if (isUuidShaped(raw)) {
         const byId = await getById(raw);
         if (!byId || byId.companyId !== companyId) {
           return { agent: null, ambiguous: false } as const;
